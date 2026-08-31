@@ -237,6 +237,7 @@ def test_no_wage_text_on_pages() -> None:
         assert re.search(r"\$\s*\d", response.text) is None
         assert "trussville" not in text
         assert "/register-admin" not in text
+        assert "talent reads" not in text
         if response is not apply_form:
             assert "application/pdf" not in text
             assert 'type="file"' not in text
@@ -244,6 +245,8 @@ def test_no_wage_text_on_pages() -> None:
     assert 'type="file"' in apply_form.text
     assert 'name="resume"' in apply_form.text
     assert "Resume (PDF, optional)" in apply_form.text
+    assert "Talent reads" not in apply_form.text
+    assert "A few sentences about why you want to work here." in apply_form.text
     home = pages[0]
     assert home.status_code == 200
     assert "No resume file" not in home.text
@@ -252,6 +255,8 @@ def test_no_wage_text_on_pages() -> None:
 TINY_PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
 JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 24
+DOC_BYTES = b"\xd0\xcf\x11\xe0" + b"\x00" * 24
+DOCX_BYTES = b"PK\x03\x04" + b"\x00" * 24
 
 
 def test_home_no_longer_says_no_resume_file() -> None:
@@ -305,6 +310,9 @@ def test_non_pdf_resume_rejected() -> None:
         ("spoofpng@example.com", ("resume.pdf", PNG_BYTES, "application/pdf")),
         ("spoofjpeg@example.com", ("resume.pdf", JPEG_BYTES, "image/jpeg")),
         ("realpng@example.com", ("photo.png", PNG_BYTES, "image/png")),
+        ("realjpg@example.com", ("photo.jpg", JPEG_BYTES, "image/jpeg")),
+        ("realdoc@example.com", ("resume.doc", DOC_BYTES, "application/msword")),
+        ("realdocx@example.com", ("resume.docx", DOCX_BYTES, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
     )
     for email, file_tuple in cases:
         client = _client()
@@ -323,6 +331,19 @@ def test_non_pdf_resume_rejected() -> None:
         status = client.get("/application", follow_redirects=False)
         assert status.status_code in (302, 303)
         assert status.headers["location"].endswith("/apply")
+
+
+def test_empty_content_type_pdf_is_accepted() -> None:
+    client = _client()
+    _signup(client, "emptyctype@example.com")
+    created = client.post(
+        "/apply",
+        data=_apply_data(name="Empty Ctype"),
+        files={"resume": ("resume.pdf", TINY_PDF, "")},
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    assert "Resume attached (PDF)" in created.text
 
 
 def test_unauthenticated_cannot_download_resume() -> None:

@@ -1,0 +1,21 @@
+<tr id="app-{{ item.id }}">
+  <td>{{ item.name }}</td>
+  <td>{{ item.phone }}</td>
+  <td>{{ item.availability }}</td>
+  <td>{{ item.role }}</td>
+  <td>{{ chicago_stamp(item.submitted_at) }}</td>
+  <td class="status status-{{ item.status }}">{{ item.status }}</td>
+  <td>
+    {% if item.status != "reviewed" %}
+      <form
+        method="post"
+        action="/admin/applications/{{ item.id }}/review"
+        hx-post="/admin/applications/{{ item.id }}/review"
+        hx-target="#app-{{ item.id }}"
+        hx-swap="outerHTML"
+      >
+        <button type="submit">Mark reviewed</button>
+      </form>
+    {% endif %}
+  </td>
+</tr>

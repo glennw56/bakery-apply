@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Apply · Sunshine's Bakery{% endblock %}
+{% block content %}
+  <h1>Apply — {{ live_role }}</h1>
+  <p class="lede">{{ shop_address }} · {{ shop_phone }}</p>
+  <form class="note-form" method="post" action="/apply">
+    <label>Name
+      <input type="text" name="name" required maxlength="255" autocomplete="name">
+    </label>
+    <label>Phone
+      <input type="tel" name="phone" required maxlength="64" autocomplete="tel">
+    </label>
+    <label>Availability
+      <textarea name="availability" rows="4" required placeholder="Days and times you can work"></textarea>
+    </label>
+    <label>Role
+      <select name="role">
+        {% for r in role_options %}
+          <option value="{{ r }}" selected>{{ r }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Submit application</button>
+  </form>
+{% endblock %}

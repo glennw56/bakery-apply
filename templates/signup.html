@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Sign up · Sunshine's Bakery{% endblock %}
+{% block content %}
+  <h1>Create an account</h1>
+  <p class="lede">Email and password. Then fill in the {{ live_role }} form.</p>
+  <form class="note-form" method="post" action="/signup">
+    <label>Email
+      <input type="email" name="email" required autocomplete="email">
+    </label>
+    <label>Password
+      <input type="password" name="password" required minlength="8" autocomplete="new-password">
+    </label>
+    <button type="submit">Sign up</button>
+  </form>
+  <p class="hint">Already have an account? <a href="/login">Log in</a>.</p>
+{% endblock %}

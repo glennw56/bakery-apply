@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Hiring · Sunshine's Bakery{% endblock %}
+{% block body_class %}home{% endblock %}
+{% block content %}
+  <h1>We're hiring</h1>
+  <p class="lede">Sunshine's Bakery is a small neighborhood shop in downtown Irondale. We bake pastries, bread, and cookies, and we serve coffee, boba, and lemonades. We want the shop to feel like a place neighbors are glad they stopped.</p>
+
+  <section class="shop-card" aria-label="Shop">
+    <p><strong>{{ shop_name }}</strong></p>
+    <p>{{ shop_address }}</p>
+    <p>Phone {{ shop_phone }}</p>
+  </section>
+
+  <section class="role-card">
+    <h2>Live role</h2>
+    <p class="role-name">{{ live_role }}</p>
+    <p>Greet guests, help them pick from the case, ring up orders, keep the front clean, and learn the week's menu. Bakery or coffee experience is nice, not required. Weekends matter. This is a small family shop, not a chain.</p>
+  </section>
+
+  <p class="hint">One form. No resume file. Create an account, then apply.</p>
+  {% if user and user.is_admin %}
+    <p><a class="btn" href="/admin">Review applications</a></p>
+  {% elif user %}
+    <p><a class="btn" href="/apply">Continue your application</a></p>
+  {% else %}
+    <p><a class="btn" href="/signup">Sign up to apply</a> <a class="btn btn-ghost" href="/login">Log in</a></p>
+  {% endif %}
+{% endblock %}

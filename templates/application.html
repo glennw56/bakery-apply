@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Your application · Sunshine's Bakery{% endblock %}
+{% block content %}
+  <h1>Your application</h1>
+  <p class="lede">One application per account. Status is {{ application.status }}.</p>
+  <article class="shop-card">
+    <p><strong>{{ application.name }}</strong></p>
+    <p>Phone {{ application.phone }}</p>
+    <p>Role {{ application.role }}</p>
+    <p>Availability: {{ application.availability }}</p>
+    <p>Submitted {{ chicago_stamp(application.submitted_at) }}</p>
+    <p class="status status-{{ application.status }}">Status: {{ application.status }}</p>
+  </article>
+{% endblock %}

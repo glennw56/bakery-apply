@@ -1,0 +1,14 @@
+services:
+  bakery-apply:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      BAKERY_APPLY_DB: /app/data/app.db
+      PORT: "8000"
+      HOST: "0.0.0.0"
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-to-a-long-random-string}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@localhost}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}

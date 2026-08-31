@@ -35,9 +35,12 @@ from app.auth import (
 )
 from app.db import get_db, init_db
 from app.models import (
+    HEAR_ABOUT_CHOICES,
+    HEAR_ABOUT_SLUGS,
     ROLE_COUNTER,
     STATUS_REVIEWED,
     STATUS_SUBMITTED,
+    YES_NO,
     Application,
     User,
 )
@@ -98,6 +101,7 @@ templates.env.globals["shop_name"] = SHOP_NAME
 templates.env.globals["shop_address"] = SHOP_ADDRESS
 templates.env.globals["shop_phone"] = SHOP_PHONE
 templates.env.globals["live_role"] = LIVE_ROLE
+templates.env.globals["hear_about_choices"] = HEAR_ABOUT_CHOICES
 
 
 def _ctx(request: Request, user: User | None, **extra):
@@ -224,6 +228,10 @@ def apply_form(
     return render(request, "apply.html", user)
 
 
+def _yes_no(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
 @app.post("/apply")
 def apply_submit(
     request: Request,
@@ -231,6 +239,16 @@ def apply_submit(
     phone: str = Form(...),
     availability: str = Form(...),
     role: str = Form(LIVE_ROLE),
+    weekends: str = Form(""),
+    start_date: str = Form(""),
+    hours_per_week: str = Form(""),
+    age_18: str = Form(""),
+    work_auth: str = Form(""),
+    been_in_shop: str = Form(""),
+    prior_counter: str = Form(""),
+    prior_where: str = Form(""),
+    why_shop: str = Form(""),
+    hear_about: str = Form(""),
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
@@ -242,9 +260,34 @@ def apply_submit(
     name = name.strip()
     phone = phone.strip()
     availability = availability.strip()
+    weekends = _yes_no(weekends)
+    start_date = start_date.strip()
+    hours_per_week = hours_per_week.strip()
+    age_18 = _yes_no(age_18)
+    work_auth = _yes_no(work_auth)
+    been_in_shop = _yes_no(been_in_shop)
+    prior_counter = _yes_no(prior_counter)
+    prior_where = prior_where.strip()
+    why_shop = why_shop.strip()
+    hear_about = hear_about.strip()
     if not name or not phone or not availability:
         _flash(request, "Name, phone, and availability are required.")
         return _redirect("/apply")
+    yn_ok = all(
+        v in YES_NO
+        for v in (weekends, age_18, work_auth, been_in_shop, prior_counter)
+    )
+    if not yn_ok or not start_date or not hours_per_week or hear_about not in HEAR_ABOUT_SLUGS:
+        _flash(request, "Please answer all of the screening questions.")
+        return _redirect("/apply")
+    if not why_shop:
+        _flash(request, "Please tell us why this shop — a few sentences.")
+        return _redirect("/apply")
+    if prior_counter == "yes" and not prior_where:
+        _flash(request, "If you have bakery, coffee, or cafe counter work, say where.")
+        return _redirect("/apply")
+    if prior_counter != "yes":
+        prior_where = ""
     # Only the live Counter / Cashier role is accepted in v1.
     _ = role
     app_row = Application(
@@ -253,6 +296,16 @@ def apply_submit(
         phone=phone,
         availability=availability,
         role=LIVE_ROLE,
+        weekends=weekends,
+        start_date=start_date,
+        hours_per_week=hours_per_week,
+        age_18=age_18,
+        work_auth=work_auth,
+        been_in_shop=been_in_shop,
+        prior_counter=prior_counter,
+        prior_where=prior_where,
+        why_shop=why_shop,
+        hear_about=hear_about,
         status=STATUS_SUBMITTED,
         submitted_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )

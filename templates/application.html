@@ -8,6 +8,28 @@
     <p>Phone {{ application.phone }}</p>
     <p>Role {{ application.role }}</p>
     <p>Availability: {{ application.availability }}</p>
+    <h2>Why this shop?</h2>
+    <p class="why-shop">{{ application.why_shop }}</p>
+    <dl class="dl">
+      <dt>Weekends</dt>
+      <dd>{{ application.weekends|capitalize }}</dd>
+      <dt>Earliest start</dt>
+      <dd>{{ application.start_date }}</dd>
+      <dt>Hours per week</dt>
+      <dd>{{ application.hours_per_week }}</dd>
+      <dt>18 or older</dt>
+      <dd>{{ application.age_18|capitalize }}</dd>
+      <dt>Work authorized</dt>
+      <dd>{{ application.work_auth|capitalize }}</dd>
+      <dt>Been in the shop</dt>
+      <dd>{{ application.been_in_shop|capitalize }}</dd>
+      <dt>Counter experience</dt>
+      <dd>
+        {{ application.prior_counter|capitalize }}{% if application.prior_counter == "yes" and application.prior_where %} — {{ application.prior_where }}{% endif %}
+      </dd>
+      <dt>Heard about us</dt>
+      <dd>{{ application.hear_about_label }}</dd>
+    </dl>
     <p>Submitted {{ chicago_stamp(application.submitted_at) }}</p>
     <p class="status status-{{ application.status }}">Status: {{ application.status }}</p>
   </article>

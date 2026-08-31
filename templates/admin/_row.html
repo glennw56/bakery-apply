@@ -1,21 +1,42 @@
-<tr id="app-{{ item.id }}">
-  <td>{{ item.name }}</td>
-  <td>{{ item.phone }}</td>
-  <td>{{ item.availability }}</td>
-  <td>{{ item.role }}</td>
-  <td>{{ chicago_stamp(item.submitted_at) }}</td>
-  <td class="status status-{{ item.status }}">{{ item.status }}</td>
-  <td>
-    {% if item.status != "reviewed" %}
-      <form
-        method="post"
-        action="/admin/applications/{{ item.id }}/review"
-        hx-post="/admin/applications/{{ item.id }}/review"
-        hx-target="#app-{{ item.id }}"
-        hx-swap="outerHTML"
-      >
-        <button type="submit">Mark reviewed</button>
-      </form>
-    {% endif %}
-  </td>
-</tr>
+<article class="shop-card app-card" id="app-{{ item.id }}">
+  <header>
+    <p><strong>{{ item.name }}</strong> · {{ item.phone }}</p>
+    <p class="status status-{{ item.status }}">{{ item.status }}</p>
+  </header>
+  <p>Role {{ item.role }} · Availability: {{ item.availability }}</p>
+  <h2>Why this shop?</h2>
+  <p class="why-shop">{{ item.why_shop }}</p>
+  <dl class="dl">
+    <dt>Weekends</dt>
+    <dd>{{ item.weekends|capitalize }}</dd>
+    <dt>Earliest start</dt>
+    <dd>{{ item.start_date }}</dd>
+    <dt>Hours per week</dt>
+    <dd>{{ item.hours_per_week }}</dd>
+    <dt>18 or older</dt>
+    <dd>{{ item.age_18|capitalize }}</dd>
+    <dt>Work authorized</dt>
+    <dd>{{ item.work_auth|capitalize }}</dd>
+    <dt>Been in the shop</dt>
+    <dd>{{ item.been_in_shop|capitalize }}</dd>
+    <dt>Counter experience</dt>
+    <dd>
+      {{ item.prior_counter|capitalize }}{% if item.prior_counter == "yes" and item.prior_where %} — {{ item.prior_where }}{% endif %}
+    </dd>
+    <dt>Heard about us</dt>
+    <dd>{{ item.hear_about_label }}</dd>
+    <dt>Submitted</dt>
+    <dd>{{ chicago_stamp(item.submitted_at) }}</dd>
+  </dl>
+  {% if item.status != "reviewed" %}
+    <form
+      method="post"
+      action="/admin/applications/{{ item.id }}/review"
+      hx-post="/admin/applications/{{ item.id }}/review"
+      hx-target="#app-{{ item.id }}"
+      hx-swap="outerHTML"
+    >
+      <button type="submit">Mark reviewed</button>
+    </form>
+  {% endif %}
+</article>

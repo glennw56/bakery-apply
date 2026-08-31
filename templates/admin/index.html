@@ -3,26 +3,13 @@
 {% block body_class %}admin{% endblock %}
 {% block content %}
   <h1>Applications</h1>
-  <p class="lede">Counter / Cashier applications for the Irondale shop. Mark reviewed when you have looked.</p>
+  <p class="lede">Counter / Cashier applications for the Irondale shop. Read why this shop first. Mark reviewed when you have looked.</p>
   {% if applications %}
-    <table class="sales">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Phone</th>
-          <th>Availability</th>
-          <th>Role</th>
-          <th>Submitted</th>
-          <th>Status</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in applications %}
-          {% include "admin/_row.html" %}
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="app-list">
+      {% for item in applications %}
+        {% include "admin/_row.html" %}
+      {% endfor %}
+    </div>
   {% else %}
     <p class="hint">No applications yet.</p>
   {% endif %}

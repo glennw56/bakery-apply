@@ -20,6 +20,61 @@
         {% endfor %}
       </select>
     </label>
+    <fieldset class="yn">
+      <legend>Can you work weekends?</legend>
+      <div class="radio-row">
+        <label><input type="radio" name="weekends" value="yes" required> Yes</label>
+        <label><input type="radio" name="weekends" value="no" required> No</label>
+      </div>
+    </fieldset>
+    <label>Earliest start date
+      <input type="date" name="start_date" required>
+    </label>
+    <label>Hours per week you want
+      <input type="text" name="hours_per_week" required maxlength="64" inputmode="numeric" placeholder="e.g. 20–25">
+    </label>
+    <fieldset class="yn">
+      <legend>Are you 18 or older?</legend>
+      <div class="radio-row">
+        <label><input type="radio" name="age_18" value="yes" required> Yes</label>
+        <label><input type="radio" name="age_18" value="no" required> No</label>
+      </div>
+    </fieldset>
+    <fieldset class="yn">
+      <legend>Legally allowed to work in the US?</legend>
+      <div class="radio-row">
+        <label><input type="radio" name="work_auth" value="yes" required> Yes</label>
+        <label><input type="radio" name="work_auth" value="no" required> No</label>
+      </div>
+    </fieldset>
+    <fieldset class="yn">
+      <legend>Have you been in the shop?</legend>
+      <div class="radio-row">
+        <label><input type="radio" name="been_in_shop" value="yes" required> Yes</label>
+        <label><input type="radio" name="been_in_shop" value="no" required> No</label>
+      </div>
+    </fieldset>
+    <fieldset class="yn">
+      <legend>Any bakery, coffee, or cafe counter work?</legend>
+      <div class="radio-row">
+        <label><input type="radio" name="prior_counter" value="yes" required> Yes</label>
+        <label><input type="radio" name="prior_counter" value="no" required> No</label>
+      </div>
+    </fieldset>
+    <label>Where (if yes)
+      <input type="text" name="prior_where" maxlength="255" placeholder="Shop or cafe name">
+    </label>
+    <label>Why this shop?
+      <textarea name="why_shop" rows="5" required placeholder="A few sentences — Talent reads this first"></textarea>
+    </label>
+    <label>How did you hear about us?
+      <select name="hear_about" required>
+        <option value="" disabled selected>Choose one</option>
+        {% for slug, label in hear_about_choices %}
+          <option value="{{ slug }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <button type="submit">Submit application</button>
   </form>
 {% endblock %}

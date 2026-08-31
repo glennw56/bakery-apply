@@ -85,3 +85,20 @@ def init_db() -> None:
     if not os.environ.get("DATABASE_URL"):
         db_path().parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    _migrate_application_columns()
+
+
+def _migrate_application_columns() -> None:
+    """ALTER TABLE ADD COLUMN for Talent fields if the local SQLite table already exists."""
+    from sqlalchemy import inspect, text
+
+    from app.models import APPLICATION_NEW_COLUMNS
+
+    inspector = inspect(engine)
+    if "applications" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("applications")}
+    with engine.begin() as conn:
+        for name, spec in APPLICATION_NEW_COLUMNS:
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE applications ADD COLUMN {name} {spec}"))

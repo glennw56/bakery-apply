@@ -141,3 +141,64 @@ table.sales th {
   table.sales { display: block; overflow-x: auto; }
   nav { gap: 0.7rem; }
 }
+
+fieldset.yn {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+fieldset.yn legend {
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0;
+}
+.radio-row {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+.radio-row label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.radio-row input[type="radio"] {
+  width: auto;
+  padding: 0;
+}
+.why-shop {
+  white-space: pre-wrap;
+  margin: 0.4rem 0 0.85rem;
+  padding: 0.75rem 0.9rem;
+  background: #fff8e8;
+  border: 2px solid var(--line);
+  border-left-width: 6px;
+  border-left-color: var(--accent);
+  border-radius: var(--radius);
+  font-weight: 500;
+}
+.dl {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  gap: 0.2rem 0.8rem;
+  margin: 0.6rem 0 0.9rem;
+}
+.dl dt { font-weight: 700; font-size: 0.85rem; color: var(--muted); }
+.dl dd { margin: 0; }
+.app-list { display: grid; gap: 1rem; }
+.app-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+}
+.app-card header p { margin: 0; }
+@media (max-width: 720px) {
+  .dl { grid-template-columns: 1fr; }
+}

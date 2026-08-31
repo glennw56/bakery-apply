@@ -34,6 +34,8 @@ WAGE_NEEDLES = (
     "stipend",
 )
 
+WHY_SHOP = "I walk here for cookies and want to work a small neighborhood shop."
+
 
 def _client() -> TestClient:
     return TestClient(app)
@@ -46,6 +48,27 @@ def _signup(client: TestClient, email: str, password: str = "secret123") -> None
         follow_redirects=False,
     )
     assert response.status_code in (302, 303)
+
+
+def _apply_data(**overrides: str) -> dict[str, str]:
+    data = {
+        "name": "Jane Doe",
+        "phone": "205-555-0100",
+        "availability": "Weekends and after 3pm",
+        "role": "Counter / Cashier",
+        "weekends": "yes",
+        "start_date": "2026-09-08",
+        "hours_per_week": "25",
+        "age_18": "yes",
+        "work_auth": "yes",
+        "been_in_shop": "yes",
+        "prior_counter": "no",
+        "prior_where": "",
+        "why_shop": WHY_SHOP,
+        "hear_about": "walked_in",
+    }
+    data.update(overrides)
+    return data
 
 
 def test_signup() -> None:
@@ -75,18 +98,35 @@ def test_submit_application() -> None:
     _signup(client, "apply@example.com")
     created = client.post(
         "/apply",
-        data={
-            "name": "Jane Doe",
-            "phone": "205-555-0100",
-            "availability": "Weekends and after 3pm",
-            "role": "Counter / Cashier",
-        },
+        data=_apply_data(),
         follow_redirects=True,
     )
     assert created.status_code == 200
     assert "Jane Doe" in created.text
     assert "submitted" in created.text.lower()
     assert "Weekends and after 3pm" in created.text
+    assert WHY_SHOP in created.text
+    assert "type=\"file\"" not in created.text
+    assert "application/pdf" not in created.text.lower()
+    status = client.get("/application")
+    assert status.status_code == 200
+    assert WHY_SHOP in status.text
+    assert "Walked in" in status.text
+
+
+def test_missing_why_shop_redirects_to_apply() -> None:
+    client = _client()
+    _signup(client, "nowhy@example.com")
+    data = _apply_data()
+    data["why_shop"] = ""
+    response = client.post("/apply", data=data, follow_redirects=False)
+    assert response.status_code in (302, 303)
+    assert response.headers["location"].endswith("/apply")
+    missing = _apply_data()
+    missing.pop("why_shop")
+    omitted = client.post("/apply", data=missing, follow_redirects=False)
+    assert omitted.status_code in (302, 303)
+    assert omitted.headers["location"].endswith("/apply")
 
 
 def test_admin_can_list_apps() -> None:
@@ -94,12 +134,15 @@ def test_admin_can_list_apps() -> None:
     _signup(applicant, "listed@example.com")
     applicant.post(
         "/apply",
-        data={
-            "name": "Sam Irondale",
-            "phone": "(205) 555-0199",
-            "availability": "Thu–Sun",
-            "role": "Counter / Cashier",
-        },
+        data=_apply_data(
+            name="Sam Irondale",
+            phone="(205) 555-0199",
+            availability="Thu–Sun",
+            prior_counter="yes",
+            prior_where="Daily Bread Cafe",
+            why_shop=WHY_SHOP,
+            hear_about="instagram",
+        ),
     )
 
     admin = _client()
@@ -115,6 +158,10 @@ def test_admin_can_list_apps() -> None:
     assert "(205) 555-0199" in page.text
     assert "Thu–Sun" in page.text
     assert "Counter / Cashier" in page.text
+    assert WHY_SHOP in page.text
+    assert "Daily Bread Cafe" in page.text
+    assert "Instagram" in page.text
+    assert "register-admin" not in page.text
 
     marked = admin.post(
         "/admin/applications/1/review",
@@ -132,6 +179,7 @@ def test_admin_can_list_apps() -> None:
         )
     assert marked.status_code == 200
     assert "reviewed" in marked.text.lower()
+    assert WHY_SHOP in marked.text
 
 
 def test_unauthenticated_cannot_hit_admin() -> None:
@@ -163,15 +211,9 @@ def test_no_wage_text_on_pages() -> None:
     client = _client()
     pages = [client.get("/"), client.get("/signup"), client.get("/login")]
     _signup(client, "nowage@example.com")
-    client.post(
-        "/apply",
-        data={
-            "name": "Pat Irondale",
-            "phone": "205-555-0111",
-            "availability": "Open",
-            "role": "Counter / Cashier",
-        },
-    )
+    apply_form = client.get("/apply")
+    pages.append(apply_form)
+    client.post("/apply", data=_apply_data(name="Pat Irondale", phone="205-555-0111", availability="Open"))
     pages.append(client.get("/apply"))
     pages.append(client.get("/application"))
 
@@ -193,3 +235,7 @@ def test_no_wage_text_on_pages() -> None:
         assert "trussville" not in text
         assert "application/pdf" not in text
         assert "type=\"file\"" not in text
+        assert "/register-admin" not in text
+    assert apply_form.status_code == 200
+    assert "type=\"file\"" not in apply_form.text
+    assert "resume" not in apply_form.text.lower()

@@ -38,6 +38,7 @@ APPLICATION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("prior_where", "VARCHAR(255) DEFAULT '' NOT NULL"),
     ("why_shop", "TEXT DEFAULT '' NOT NULL"),
     ("hear_about", "VARCHAR(32) DEFAULT '' NOT NULL"),
+    ("resume_path", "VARCHAR(255) DEFAULT '' NOT NULL"),
 )
 
 
@@ -60,7 +61,7 @@ class User(Base):
 
 
 class Application(Base):
-    """One job application per account. No resume PDF."""
+    """One job application per account. Optional resume PDF on local disk."""
 
     __tablename__ = "applications"
     __table_args__ = (UniqueConstraint("user_id", name="uq_applications_user_id"),)
@@ -81,6 +82,7 @@ class Application(Base):
     prior_where: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     why_shop: Mapped[str] = mapped_column(Text, nullable=False, default="")
     hear_about: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    resume_path: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=STATUS_SUBMITTED)
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()

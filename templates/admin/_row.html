@@ -28,6 +28,9 @@
     <dt>Submitted</dt>
     <dd>{{ chicago_stamp(item.submitted_at) }}</dd>
   </dl>
+  {% if item.resume_path %}
+    <p><a href="/admin/applications/{{ item.id }}/resume">Download resume (PDF)</a></p>
+  {% endif %}
   {% if item.status != "reviewed" %}
     <form
       method="post"

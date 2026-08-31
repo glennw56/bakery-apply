@@ -3,7 +3,7 @@
 {% block content %}
   <h1>Apply — {{ live_role }}</h1>
   <p class="lede">{{ shop_address }} · {{ shop_phone }}</p>
-  <form class="note-form" method="post" action="/apply">
+  <form class="note-form" method="post" action="/apply" enctype="multipart/form-data">
     <label>Name
       <input type="text" name="name" required maxlength="255" autocomplete="name">
     </label>
@@ -74,6 +74,9 @@
           <option value="{{ slug }}">{{ label }}</option>
         {% endfor %}
       </select>
+    </label>
+    <label>Resume (PDF, optional)
+      <input type="file" name="resume" accept="application/pdf,.pdf">
     </label>
     <button type="submit">Submit application</button>
   </form>

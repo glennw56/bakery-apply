@@ -1,10 +1,11 @@
-"""Cover signup, login, apply, admin list, auth walls, no public admin, no wage text."""
+"""Cover signup, login, apply, optional resume PDF, admin list, auth walls, no wage text."""
 
 from __future__ import annotations
 
 import os
 import re
 import tempfile
+from pathlib import Path
 
 _fd, _db = tempfile.mkstemp(suffix=".db")
 os.close(_fd)
@@ -108,10 +109,12 @@ def test_submit_application() -> None:
     assert WHY_SHOP in created.text
     assert "type=\"file\"" not in created.text
     assert "application/pdf" not in created.text.lower()
+    assert "Resume attached (PDF)" not in created.text
     status = client.get("/application")
     assert status.status_code == 200
     assert WHY_SHOP in status.text
     assert "Walked in" in status.text
+    assert "Resume attached (PDF)" not in status.text
 
 
 def test_missing_why_shop_redirects_to_apply() -> None:
@@ -233,9 +236,98 @@ def test_no_wage_text_on_pages() -> None:
             assert needle not in text, f"{needle!r} found on page"
         assert re.search(r"\$\s*\d", response.text) is None
         assert "trussville" not in text
-        assert "application/pdf" not in text
-        assert "type=\"file\"" not in text
         assert "/register-admin" not in text
+        if response is not apply_form:
+            assert "application/pdf" not in text
+            assert 'type="file"' not in text
     assert apply_form.status_code == 200
-    assert "type=\"file\"" not in apply_form.text
-    assert "resume" not in apply_form.text.lower()
+    assert 'type="file"' in apply_form.text
+    assert 'name="resume"' in apply_form.text
+    assert "Resume (PDF, optional)" in apply_form.text
+    home = pages[0]
+    assert home.status_code == 200
+    assert "No resume file" not in home.text
+    assert "Resume PDF is optional" in home.text
+
+TINY_PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 24
+
+
+def test_home_no_longer_says_no_resume_file() -> None:
+    home = _client().get("/")
+    assert home.status_code == 200
+    assert "No resume file" not in home.text
+    assert "Resume PDF is optional" in home.text
+
+
+def test_apply_with_valid_resume_pdf_admin_can_download() -> None:
+    client = _client()
+    _signup(client, "withpdf@example.com")
+    created = client.post(
+        "/apply",
+        data=_apply_data(name="Pat Pdf"),
+        files={"resume": ("resume.pdf", TINY_PDF, "application/pdf")},
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    assert "Pat Pdf" in created.text
+    assert "Resume attached (PDF)" in created.text
+    assert "/data/resumes" not in created.text
+    assert 'href="/admin/applications/' not in created.text
+
+    admin = _client()
+    logged = admin.post(
+        "/login",
+        data={"email": "admin@test.local", "password": "admin-test-password"},
+        follow_redirects=False,
+    )
+    assert logged.status_code in (302, 303)
+    page = admin.get("/admin")
+    assert page.status_code == 200
+    ids = re.findall(r"/admin/applications/(\d+)/resume", page.text)
+    assert ids
+    app_id = ids[0]
+    stored = Path("/workspace/bakery-apply/data/resumes") / f"{app_id}.pdf"
+    assert stored.is_file()
+    assert stored.read_bytes().startswith(b"%PDF")
+    downloaded = admin.get(f"/admin/applications/{app_id}/resume")
+    assert downloaded.status_code == 200
+    assert downloaded.content.startswith(b"%PDF")
+    cd = downloaded.headers.get("content-disposition", "").lower()
+    assert "attachment" in cd
+    assert "resume.pdf" in cd
+
+
+def test_non_pdf_resume_rejected() -> None:
+    """PNG/JPEG bytes named resume.pdf, or a real .png, bounce back with no row."""
+    cases = (
+        ("spoofpng@example.com", ("resume.pdf", PNG_BYTES, "application/pdf")),
+        ("spoofjpeg@example.com", ("resume.pdf", JPEG_BYTES, "image/jpeg")),
+        ("realpng@example.com", ("photo.png", PNG_BYTES, "image/png")),
+    )
+    for email, file_tuple in cases:
+        client = _client()
+        _signup(client, email)
+        response = client.post(
+            "/apply",
+            data=_apply_data(),
+            files={"resume": file_tuple},
+            follow_redirects=False,
+        )
+        assert response.status_code in (302, 303), email
+        assert response.headers["location"].endswith("/apply"), email
+        still = client.get("/apply", follow_redirects=False)
+        assert still.status_code == 200, email
+        assert "Resume attached (PDF)" not in still.text
+        status = client.get("/application", follow_redirects=False)
+        assert status.status_code in (302, 303)
+        assert status.headers["location"].endswith("/apply")
+
+
+def test_unauthenticated_cannot_download_resume() -> None:
+    anon = _client()
+    response = anon.get("/admin/applications/1/resume", follow_redirects=False)
+    assert response.status_code in (302, 303, 401, 403)
+    if response.status_code in (302, 303):
+        assert "/login" in response.headers.get("location", "")

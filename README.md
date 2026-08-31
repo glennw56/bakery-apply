@@ -2,13 +2,13 @@
 
 ## What this is
 
-Public job-apply site for **Sunshine's Bakery** (Irondale, AL). Form-only v1: one live role (Counter / Cashier), applicant signup/login, one application per account, seeded admin list. FastAPI + Jinja + HTMX + one SQLite file (`data/app.db`, WAL).
+Public job-apply site for **Sunshine's Bakery** (Irondale, AL). One live role (Counter / Cashier), applicant signup/login, one application per account, optional resume PDF, seeded admin list. FastAPI + Jinja + HTMX + one SQLite file (`data/app.db`, WAL).
 
 **Shop:** 2231 1st Ave S, Irondale AL 35210 · (205) 602-3485
 
 **Not in git:** `.env`, the live sqlite file, Square tokens / API keys (this app does not use Square). `data/*` is gitignored except `data/.gitkeep`. Copy `.env.example` to `.env` and set `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
 
-v1 does **not** post jobs, email candidates, upload resumes, or talk about wages. There is no second location and no public `/register-admin`.
+v1 does **not** post jobs, email candidates, or talk about wages. There is no second location and no public `/register-admin`. An optional resume PDF can be uploaded on the apply form; files live on local disk under `data/resumes/` (gitignored with `data/*`). Cloud Storage waits until GCP. Cloud Run with one instance can use a volume later. Do not add a GCS bucket now.
 
 ## Quick start
 
@@ -35,10 +35,11 @@ htmx 2.x is vendored at `static/htmx.min.js` (offline).
 | `GET`/`POST /signup` | Applicant account (email + password). `is_admin` is ignored if sent |
 | `GET`/`POST /login` | Session cookie login |
 | `POST /logout` | Clear session |
-| `GET`/`POST /apply` | Logged-in applicant form: name, phone, availability, role |
-| `GET /application` | Own application + status (`submitted` / `reviewed`) |
+| `GET`/`POST /apply` | Logged-in applicant form: name, phone, availability, role, Talent screening, optional resume PDF |
+| `GET /application` | Own application + status (`submitted` / `reviewed`). Shows “Resume attached (PDF)” if a file was uploaded; does not serve the file |
 | `GET /admin` | Admin-only list (name, phone, availability, role, submitted_at, status) |
 | `POST /admin/applications/{id}/review` | Mark reviewed (HTMX swaps the row) |
+| `GET /admin/applications/{id}/resume` | Admin-only PDF download (`{name}-resume.pdf`). 404 if none. `/data/resumes` is not a public static path |
 
 Unauthenticated `/admin` redirects to `/login`. There is no `/register-admin`.
 
@@ -83,7 +84,7 @@ docker compose up --build
 ./scripts/test.sh
 ```
 
-Or `make test`, or `PYTHONPATH=. .venv/bin/pytest -q`. Uses a throwaway sqlite file (`BAKERY_APPLY_DB` tempfile); does not touch `data/app.db`. Covers signup, login, submit application, admin list, unauthenticated `/admin`, no public admin register, no wage text on pages.
+Or `make test`, or `PYTHONPATH=. .venv/bin/pytest -q`. Uses a throwaway sqlite file (`BAKERY_APPLY_DB` tempfile); does not touch `data/app.db`. Covers signup, login, submit application (with and without optional PDF), rejected non-PDF, admin list + resume download, unauthenticated `/admin` and resume GET, no public admin register, no wage text on pages.
 
 ## Env
 
@@ -99,7 +100,7 @@ Or `make test`, or `PYTHONPATH=. .venv/bin/pytest -q`. Uses a throwaway sqlite f
 
 ## Cloud Run (copy-paste)
 
-SQLite lives at `/app/data/app.db` on the instance. **It is not durable across instance replacements or multiple instances.** v1 is one instance (`--max-instances=1`). No Cloud Storage. No Vercel. Do not hang a custom domain off sunshinebakeshop.com from this repo.
+SQLite lives at `/app/data/app.db` on the instance. Resume PDFs live under `data/resumes/` on the same local disk. **Neither is durable across instance replacements or multiple instances.** v1 is one instance (`--max-instances=1`). Cloud Storage waits until GCP; a later Cloud Run volume can hold `data/`. No GCS bucket in this repo. No Vercel. Do not hang a custom domain off sunshinebakeshop.com from this repo.
 
 Replace `PROJECT_ID` and the secret values. Region `us-central1` is an example.
 

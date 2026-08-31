@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -54,6 +54,8 @@ SHOP_NAME = "Sunshine's Bakery"
 SHOP_ADDRESS = "2231 1st Ave S, Irondale AL 35210"
 SHOP_PHONE = "(205) 602-3485"
 LIVE_ROLE = ROLE_COUNTER
+RESUMES_DIR = ROOT / "data" / "resumes"
+MAX_RESUME_BYTES = 5 * 1024 * 1024
 
 
 def session_secret() -> str:
@@ -232,6 +234,41 @@ def _yes_no(value: str | None) -> str:
     return (value or "").strip().lower()
 
 
+def _optional_resume_bytes(upload: UploadFile | None) -> bytes | None:
+    """Return PDF bytes, None if omitted, or raise ValueError if not a valid PDF."""
+    if upload is None:
+        return None
+    filename = (upload.filename or "").strip()
+    if not filename:
+        return None
+    if not filename.lower().endswith(".pdf"):
+        raise ValueError("Resume must be a PDF.")
+    ctype = (upload.content_type or "").strip()
+    if ";" in ctype:
+        ctype = ctype.split(";", 1)[0].strip()
+    if ctype and ctype.lower() != "application/pdf":
+        raise ValueError("Resume must be a PDF.")
+    blob = upload.file.read(MAX_RESUME_BYTES + 1)
+    if len(blob) > MAX_RESUME_BYTES:
+        raise ValueError("Resume must be 5 MB or smaller.")
+    if not blob.startswith(b"%PDF"):
+        raise ValueError("Resume must be a PDF.")
+    return blob
+
+
+def _store_resume(app_id: int, blob: bytes) -> str:
+    RESUMES_DIR.mkdir(parents=True, exist_ok=True)
+    rel = f"data/resumes/{app_id}.pdf"
+    (ROOT / rel).write_bytes(blob)
+    return rel
+
+
+def _resume_attachment_name(name: str) -> str:
+    cleaned = "".join(c if c.isalnum() or c in " -_" else "-" for c in (name or "").strip())
+    cleaned = cleaned.strip(" -_") or "applicant"
+    return f"{cleaned}-resume.pdf"
+
+
 @app.post("/apply")
 def apply_submit(
     request: Request,
@@ -249,6 +286,7 @@ def apply_submit(
     prior_where: str = Form(""),
     why_shop: str = Form(""),
     hear_about: str = Form(""),
+    resume: UploadFile | None = File(None),
     user: User = Depends(require_login),
     db: Session = Depends(get_db),
 ):
@@ -288,6 +326,11 @@ def apply_submit(
         return _redirect("/apply")
     if prior_counter != "yes":
         prior_where = ""
+    try:
+        resume_bytes = _optional_resume_bytes(resume)
+    except ValueError as exc:
+        _flash(request, str(exc))
+        return _redirect("/apply")
     # Only the live Counter / Cashier role is accepted in v1.
     _ = role
     app_row = Application(
@@ -311,6 +354,10 @@ def apply_submit(
     )
     db.add(app_row)
     db.commit()
+    db.refresh(app_row)
+    if resume_bytes:
+        app_row.resume_path = _store_resume(app_row.id, resume_bytes)
+        db.commit()
     return _redirect("/application")
 
 
@@ -361,3 +408,27 @@ def admin_mark_reviewed(
     if _is_htmx(request):
         return render(request, "admin/_row.html", admin, item=row)
     return _redirect("/admin")
+
+
+@app.get("/admin/applications/{app_id}/resume")
+def admin_download_resume(
+    app_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    _ = admin
+    row = db.get(Application, app_id)
+    if row is None or not (row.resume_path or "").strip():
+        raise HTTPException(status_code=404, detail="Resume not found")
+    path = (ROOT / row.resume_path).resolve()
+    resumes_root = RESUMES_DIR.resolve()
+    if path != resumes_root and resumes_root not in path.parents:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=_resume_attachment_name(row.name),
+        content_disposition_type="attachment",
+    )

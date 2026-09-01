@@ -46,8 +46,6 @@ htmx 2.x is vendored at `static/htmx.min.js` (offline).
 | `POST /admin/positions/{id}/reopen` | Admin-only reopen |
 | `POST /admin/applications/{id}/review` | Mark reviewed (HTMX swaps the row) |
 | `GET /admin/applications/{id}/resume` | Admin-only PDF download (`{name}-resume.pdf`). 404 if none. Streams from local disk or GCS. `/data/resumes` is not a public static path |
-| `POST /admin/positions` | Admin create position (title, hours/week, hourly pay in dollars, optional description, open) |
-| `POST /admin/positions/{id}` | Admin update, close, or reopen a position |
 
 Unauthenticated `/admin` redirects to `/login`. There is no `/register-admin`.
 

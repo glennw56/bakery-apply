@@ -1,9 +1,84 @@
 {% extends "base.html" %}
-{% block title %}Applications · Sunshine's Bakery{% endblock %}
+{% block title %}Admin · Sunshine's Bakery{% endblock %}
 {% block body_class %}admin{% endblock %}
 {% block content %}
-  <h1>Applications</h1>
-  <p class="lede">Applications for the Irondale shop. Read why this shop first. Mark reviewed when you have looked. Manage openings on <a href="/admin/positions">Positions</a>.</p>
+  <h1>Admin</h1>
+  <p class="lede">Add openings here. Closed positions are hidden on the public hiring page. Existing applications keep the title they applied under.</p>
+
+  <h2>Add a position</h2>
+  <form class="note-form" method="post" action="/admin/positions">
+    <label>Title
+      <input type="text" name="title" required maxlength="128">
+    </label>
+    <label>Hours/week
+      <input type="number" name="hours_per_week" required min="0" step="1">
+    </label>
+    <label>Hourly pay (dollars)
+      <input type="number" name="hourly_pay" required min="0" step="0.01" placeholder="13">
+    </label>
+    <label>Description (optional)
+      <textarea name="description" rows="3" maxlength="2000"></textarea>
+    </label>
+    <label class="check-row">
+      <input type="checkbox" name="open" value="true" checked>
+      Open
+    </label>
+    <button type="submit">Add position</button>
+  </form>
+
+  <h2>Positions</h2>
+  {% if positions %}
+    <div class="app-list">
+      {% for p in positions %}
+        <article class="shop-card {% if not p.open %}role-closed{% endif %}" id="position-{{ p.id }}" data-position-id="{{ p.id }}">
+          <header>
+            <p><strong>{{ p.title }}</strong></p>
+            <p class="status">{% if p.open %}open{% else %}closed{% endif %}</p>
+          </header>
+          <p>{{ p.hours_per_week }} hours/week · {{ p.hourly_pay_display }}</p>
+          {% if p.description %}
+            <p>{{ p.description }}</p>
+          {% endif %}
+          <form class="note-form" method="post" action="/admin/positions/{{ p.id }}">
+            <input type="hidden" name="action" value="save">
+            <label>Title
+              <input type="text" name="title" required maxlength="128" value="{{ p.title }}">
+            </label>
+            <label>Hours/week
+              <input type="number" name="hours_per_week" required min="0" step="1" value="{{ p.hours_per_week }}">
+            </label>
+            <label>Hourly pay (dollars)
+              <input type="number" name="hourly_pay" required min="0" step="0.01" value="{{ p.pay_dollars_input }}">
+            </label>
+            <label>Description (optional)
+              <textarea name="description" rows="3" maxlength="2000">{{ p.description }}</textarea>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" name="open" value="true" {% if p.open %}checked{% endif %}>
+              Open
+            </label>
+            <button type="submit">Save</button>
+          </form>
+          {% if p.open %}
+            <form class="inline-form" method="post" action="/admin/positions/{{ p.id }}">
+              <input type="hidden" name="action" value="close">
+              <button type="submit">Close</button>
+            </form>
+          {% else %}
+            <form class="inline-form" method="post" action="/admin/positions/{{ p.id }}">
+              <input type="hidden" name="action" value="reopen">
+              <button type="submit">Reopen</button>
+            </form>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="hint">No positions yet.</p>
+  {% endif %}
+
+  <h2>Applications</h2>
+  <p class="lede">Read why this shop first. Mark reviewed when you have looked.</p>
   {% if applications %}
     <div class="app-list">
       {% for item in applications %}

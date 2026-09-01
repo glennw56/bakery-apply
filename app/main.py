@@ -404,7 +404,14 @@ def admin_list(
     store=Depends(get_store),
 ):
     rows = store.list_applications()
-    return render(request, "admin/index.html", admin, applications=rows)
+    positions = store.list_positions()
+    return render(
+        request,
+        "admin/index.html",
+        admin,
+        applications=rows,
+        positions=positions,
+    )
 
 
 @app.post("/admin/applications/{app_id}/review", response_class=HTMLResponse)
@@ -442,14 +449,10 @@ def admin_download_resume(
     return response
 
 
-@app.get("/admin/positions", response_class=HTMLResponse)
-def admin_positions(
-    request: Request,
-    admin=Depends(require_admin),
-    store=Depends(get_store),
-):
-    rows = store.list_positions()
-    return render(request, "admin/positions.html", admin, positions=rows)
+@app.get("/admin/positions")
+def admin_positions_redirect(admin=Depends(require_admin)):
+    _ = admin
+    return _redirect("/admin")
 
 
 @app.post("/admin/positions")
@@ -468,8 +471,8 @@ def admin_create_position(
     hours = _parse_hours(hours_per_week)
     cents = _parse_pay_cents(hourly_pay)
     if not title or hours is None or cents is None:
-        _flash(request, "Title, hours per week, and hourly pay (dollars) are required.")
-        return _redirect("/admin/positions")
+        _flash(request, "Title, hours/week, and hourly pay (dollars) are required.")
+        return _redirect("/admin")
     store.create_position(
         title=title,
         hours_per_week=hours,
@@ -478,41 +481,7 @@ def admin_create_position(
         description=description.strip(),
     )
     _flash(request, "Position added.")
-    return _redirect("/admin/positions")
-
-
-@app.post("/admin/positions/{pos_id}/close")
-def admin_close_position(
-    pos_id: str,
-    request: Request,
-    admin=Depends(require_admin),
-    store=Depends(get_store),
-):
-    _ = admin
-    row = store.get_position(pos_id)
-    if row is None:
-        _flash(request, "Position not found.")
-        return _redirect("/admin/positions")
-    store.update_position(row, open=False)
-    _flash(request, "Position closed. It is hidden from the public hiring page.")
-    return _redirect("/admin/positions")
-
-
-@app.post("/admin/positions/{pos_id}/open")
-def admin_reopen_position(
-    pos_id: str,
-    request: Request,
-    admin=Depends(require_admin),
-    store=Depends(get_store),
-):
-    _ = admin
-    row = store.get_position(pos_id)
-    if row is None:
-        _flash(request, "Position not found.")
-        return _redirect("/admin/positions")
-    store.update_position(row, open=True)
-    _flash(request, "Position reopened.")
-    return _redirect("/admin/positions")
+    return _redirect("/admin")
 
 
 @app.post("/admin/positions/{pos_id}")
@@ -532,22 +501,22 @@ def admin_update_position(
     row = store.get_position(pos_id)
     if row is None:
         _flash(request, "Position not found.")
-        return _redirect("/admin/positions")
+        return _redirect("/admin")
     action = (action or "").strip().lower()
     if action == "close":
         store.update_position(row, open=False)
         _flash(request, "Position closed. It is hidden from the public hiring page.")
-        return _redirect("/admin/positions")
+        return _redirect("/admin")
     if action == "reopen":
         store.update_position(row, open=True)
         _flash(request, "Position reopened.")
-        return _redirect("/admin/positions")
+        return _redirect("/admin")
     title = title.strip()
     hours = _parse_hours(hours_per_week)
     cents = _parse_pay_cents(hourly_pay)
     if not title or hours is None or cents is None:
-        _flash(request, "Title, hours per week, and hourly pay (dollars) are required.")
-        return _redirect("/admin/positions")
+        _flash(request, "Title, hours/week, and hourly pay (dollars) are required.")
+        return _redirect("/admin")
     store.update_position(
         row,
         title=title,
@@ -557,4 +526,4 @@ def admin_update_position(
         description=description.strip(),
     )
     _flash(request, "Position saved.")
-    return _redirect("/admin/positions")
+    return _redirect("/admin")

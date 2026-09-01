@@ -111,7 +111,7 @@ Cloud backend is used **only** when both `GCS_BUCKET` and `GOOGLE_CLOUD_PROJECT`
 
 ## Cloud Run (copy-paste)
 
-Do **not** use Cloud SQL. Do **not** pass `--allow-unauthenticated`. Do **not** delete existing Cloud Run services `asd`, `getorders`, or `resetitems`. This app does not use Square and does not attach sunshinebakeshop.com.
+Do **not** use Cloud SQL. Do **not** `--allow-unauthenticated` until Ronald says post. Scale to zero. Glenn creates the bucket, Firestore native database, and secrets in `bakery-444323`. Do **not** delete existing Cloud Run services `asd`, `getorders`, or `resetitems`. This app does not use Square and does not attach sunshinebakeshop.com.
 
 When `GCS_BUCKET` and `GOOGLE_CLOUD_PROJECT` are set:
 
@@ -150,8 +150,17 @@ for S in SESSION_SECRET ADMIN_EMAIL ADMIN_PASSWORD; do
 done
 
 # Deploy bakery-apply only. Do not delete asd / getorders / resetitems.
-# Skip Cloud SQL. Bucket stays private. No --allow-unauthenticated.
-gcloud run deploy bakery-apply   --image "$IMAGE"   --region "$REGION"   --no-allow-unauthenticated   --min-instances 0   --max-instances 1   --memory 512Mi   --set-env-vars "GOOGLE_CLOUD_PROJECT=bakery-444323,FIRESTORE_DATABASE=(default),GCS_BUCKET=bakery-444323-apply-resumes,FIRESTORE_COLLECTION=applications,HOST=0.0.0.0"   --set-secrets "SESSION_SECRET=SESSION_SECRET:latest,ADMIN_EMAIL=ADMIN_EMAIL:latest,ADMIN_PASSWORD=ADMIN_PASSWORD:latest"
+# Skip Cloud SQL. Bucket stays private. No --allow-unauthenticated until Ronald says post.
+# Scale to zero. Session https_only follows K_SERVICE (set by Cloud Run).
+gcloud run deploy bakery-apply \
+  --image "$IMAGE" \
+  --region "$REGION" \
+  --no-allow-unauthenticated \
+  --min-instances 0 \
+  --max-instances 1 \
+  --memory 512Mi \
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=bakery-444323,FIRESTORE_DATABASE=(default),GCS_BUCKET=bakery-444323-apply-resumes,FIRESTORE_COLLECTION=applications,HOST=0.0.0.0" \
+  --set-secrets "SESSION_SECRET=SESSION_SECRET:latest,ADMIN_EMAIL=ADMIN_EMAIL:latest,ADMIN_PASSWORD=ADMIN_PASSWORD:latest"
 ```
 
 Image is `python:3.12-slim`, non-root `appuser`, listens on `0.0.0.0:$PORT`. Dockerfile `CMD` is `scripts/docker-entrypoint.sh`.

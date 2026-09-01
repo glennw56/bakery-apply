@@ -13,6 +13,15 @@ ROLE_COUNTER = "Counter / Cashier"
 STATUS_SUBMITTED = "submitted"
 STATUS_REVIEWED = "reviewed"
 
+SEED_POSITION_TITLE = ROLE_COUNTER
+SEED_POSITION_HOURS = 40
+SEED_POSITION_PAY_CENTS = 1300
+SEED_POSITION_DESCRIPTION = (
+    "Greet guests, help them pick from the case, ring up orders, keep the front clean, "
+    "and learn the week's menu. Bakery or coffee experience is nice, not required. "
+    "Weekends matter. This is a small family shop, not a chain."
+)
+
 YES_NO = ("yes", "no")
 
 # Stable slugs stored on Application.hear_about; labels shown in the UI.
@@ -39,7 +48,25 @@ APPLICATION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("why_shop", "TEXT DEFAULT '' NOT NULL"),
     ("hear_about", "VARCHAR(32) DEFAULT '' NOT NULL"),
     ("resume_path", "VARCHAR(255) DEFAULT '' NOT NULL"),
+    ("position_id", "INTEGER"),
 )
+
+# create_all makes the table on a fresh DB. init_db ALTERs missing columns on existing files.
+POSITION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("title", "VARCHAR(128) DEFAULT '' NOT NULL"),
+    ("hours_per_week", "INTEGER DEFAULT 0 NOT NULL"),
+    ("hourly_pay_cents", "INTEGER DEFAULT 0 NOT NULL"),
+    ("open", "BOOLEAN DEFAULT 1 NOT NULL"),
+    ("description", "TEXT DEFAULT '' NOT NULL"),
+)
+
+
+def format_hourly_pay(cents: int) -> str:
+    """1300 -> $13/hour. Uneven cents keep two decimals."""
+    cents = int(cents)
+    if cents % 100 == 0:
+        return f"${cents // 100}/hour"
+    return f"${cents / 100:.2f}/hour"
 
 
 class User(Base):
@@ -60,8 +87,40 @@ class User(Base):
     )
 
 
+class Position(Base):
+    """A job opening. Public home lists open rows only; admin can add/edit/close."""
+
+    __tablename__ = "positions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(128), nullable=False)
+    hours_per_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    hourly_pay_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    @property
+    def hourly_pay_display(self) -> str:
+        return format_hourly_pay(self.hourly_pay_cents)
+
+    @property
+    def hours_label(self) -> str:
+        return f"{int(self.hours_per_week)} hours/week"
+
+    @property
+    def pay_dollars_input(self) -> str:
+        cents = int(self.hourly_pay_cents)
+        if cents % 100 == 0:
+            return str(cents // 100)
+        return f"{cents / 100:.2f}"
+
+
 class Application(Base):
-    """One job application per account. Optional resume PDF (local disk or GCS)."""
+    """One job application per account. Optional resume PDF (local disk or GCS).
+
+    role is a title snapshot from the position at submit time. position_id is the
+    live row (may later be renamed or closed).
+    """
 
     __tablename__ = "applications"
     __table_args__ = (UniqueConstraint("user_id", name="uq_applications_user_id"),)
@@ -72,6 +131,7 @@ class Application(Base):
     phone: Mapped[str] = mapped_column(String(64), nullable=False)
     availability: Mapped[str] = mapped_column(Text, nullable=False, default="")
     role: Mapped[str] = mapped_column(String(64), nullable=False, default=ROLE_COUNTER)
+    position_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weekends: Mapped[str] = mapped_column(String(8), nullable=False, default="")
     start_date: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     hours_per_week: Mapped[str] = mapped_column(String(64), nullable=False, default="")

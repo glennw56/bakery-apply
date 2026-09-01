@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Apply · Sunshine's Bakery{% endblock %}
 {% block content %}
-  <h1>Apply — {{ live_role }}</h1>
+  <h1>Apply</h1>
   <p class="lede">{{ shop_address }} · {{ shop_phone }}</p>
+  {% if not open_positions %}
+    <p class="hint">No open positions right now.</p>
+  {% else %}
   <form class="note-form" method="post" action="/apply" enctype="multipart/form-data">
     <label>Name
       <input type="text" name="name" required maxlength="255" autocomplete="name">
@@ -13,10 +16,10 @@
     <label>Availability
       <textarea name="availability" rows="4" required placeholder="Days and times you can work"></textarea>
     </label>
-    <label>Role
-      <select name="role">
-        {% for r in role_options %}
-          <option value="{{ r }}" selected>{{ r }}</option>
+    <label>Position
+      <select name="position_id" required>
+        {% for p in open_positions %}
+          <option value="{{ p.id }}" {% if loop.first %}selected{% endif %}>{{ p.title }}</option>
         {% endfor %}
       </select>
     </label>
@@ -80,4 +83,5 @@
     </label>
     <button type="submit">Submit application</button>
   </form>
+  {% endif %}
 {% endblock %}

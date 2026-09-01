@@ -1,4 +1,4 @@
-"""Cover signup, login, apply, optional resume PDF, admin list, auth walls, no wage text."""
+"""Cover signup, login, apply, optional resume PDF, admin list, auth walls, open positions."""
 
 from __future__ import annotations
 
@@ -26,9 +26,11 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.auth import seed_admin  # noqa: E402
 from app.db import init_db  # noqa: E402
 from app.main import app  # noqa: E402
+from app.store import open_store, seed_positions  # noqa: E402
 
 init_db()
 seed_admin()
+seed_positions()
 
 WAGE_NEEDLES = (
     "wage",
@@ -57,12 +59,23 @@ def _signup(client: TestClient, email: str, password: str = "secret123") -> None
     assert response.status_code in (302, 303)
 
 
+def _open_position_id() -> str:
+    store = open_store()
+    try:
+        rows = store.list_open_positions()
+        assert rows, "expected seeded open Counter / Cashier"
+        assert rows[0].title == "Counter / Cashier"
+        return str(rows[0].id)
+    finally:
+        store.close()
+
+
 def _apply_data(**overrides: str) -> dict[str, str]:
     data = {
         "name": "Jane Doe",
         "phone": "205-555-0100",
         "availability": "Weekends and after 3pm",
-        "role": "Counter / Cashier",
+        "position_id": _open_position_id(),
         "weekends": "yes",
         "start_date": "2026-09-08",
         "hours_per_week": "25",
@@ -76,6 +89,11 @@ def _apply_data(**overrides: str) -> dict[str, str]:
     }
     data.update(overrides)
     return data
+
+
+def _assert_no_invented_openings(text: str) -> None:
+    assert re.search(r"\bBaker\b", text) is None
+    assert re.search(r"\bManager\b", text) is None
 
 
 def test_signup() -> None:
@@ -103,6 +121,10 @@ def test_login() -> None:
 def test_submit_application() -> None:
     client = _client()
     _signup(client, "apply@example.com")
+    apply_form = client.get("/apply")
+    assert apply_form.status_code == 200
+    assert "Counter / Cashier" in apply_form.text
+    assert 'name="position_id"' in apply_form.text
     created = client.post(
         "/apply",
         data=_apply_data(),
@@ -113,6 +135,7 @@ def test_submit_application() -> None:
     assert "submitted" in created.text.lower()
     assert "Weekends and after 3pm" in created.text
     assert WHY_SHOP in created.text
+    assert "Counter / Cashier" in created.text
     assert "type=\"file\"" not in created.text
     assert "application/pdf" not in created.text.lower()
     assert "Resume attached (PDF)" not in created.text
@@ -120,6 +143,7 @@ def test_submit_application() -> None:
     assert status.status_code == 200
     assert WHY_SHOP in status.text
     assert "Walked in" in status.text
+    assert "Counter / Cashier" in status.text
     assert "Resume attached (PDF)" not in status.text
 
 
@@ -178,9 +202,7 @@ def test_admin_can_list_apps() -> None:
     )
     # id may not be 1 if other tests created rows; parse from the list page
     if marked.status_code == 404 or "Sam Irondale" not in marked.text:
-        import re as _re
-
-        ids = _re.findall(r"/admin/applications/(\d+)/review", page.text)
+        ids = re.findall(r"/admin/applications/(\d+)/review", page.text)
         assert ids
         marked = admin.post(
             f"/admin/applications/{ids[0]}/review",
@@ -193,10 +215,33 @@ def test_admin_can_list_apps() -> None:
 
 def test_unauthenticated_cannot_hit_admin() -> None:
     anon = _client()
-    response = anon.get("/admin", follow_redirects=False)
-    assert response.status_code in (302, 303, 401, 403)
-    if response.status_code in (302, 303):
-        assert "/login" in response.headers.get("location", "")
+    for path in ("/admin", "/admin/positions"):
+        response = anon.get(path, follow_redirects=False)
+        assert response.status_code in (302, 303, 401, 403)
+        if response.status_code in (302, 303):
+            assert "/login" in response.headers.get("location", "")
+    posted = anon.post(
+        "/admin/positions",
+        data={
+            "title": "Sneaky Role",
+            "hours_per_week": "10",
+            "hourly_pay": "8",
+            "open": "true",
+        },
+        follow_redirects=False,
+    )
+    assert posted.status_code in (302, 303, 401)
+    if posted.status_code in (302, 303):
+        assert "/login" in posted.headers.get("location", "")
+    home = anon.get("/")
+    assert home.status_code == 200
+    assert "Sneaky Role" not in home.text
+    sneaky_update = anon.post(
+        "/admin/positions/1",
+        data={"action": "close"},
+        follow_redirects=False,
+    )
+    assert sneaky_update.status_code in (302, 303, 401)
 
 
 def test_public_cannot_register_as_admin() -> None:
@@ -214,6 +259,8 @@ def test_public_cannot_register_as_admin() -> None:
     )
     admin_page = client.get("/admin", follow_redirects=False)
     assert admin_page.status_code in (302, 303, 401, 403)
+    positions = client.get("/admin/positions", follow_redirects=False)
+    assert positions.status_code in (302, 303, 401, 403)
 
 
 def test_no_wage_text_on_pages() -> None:
@@ -233,36 +280,44 @@ def test_no_wage_text_on_pages() -> None:
     )
     pages.append(admin.get("/admin"))
 
-    for response in pages:
+    home = pages[0]
+    assert home.status_code == 200
+    assert "$13/hour" in home.text
+    assert "40 hours/week" in home.text
+    assert "Counter / Cashier" in home.text
+    _assert_no_invented_openings(home.text)
+    assert "No resume file" not in home.text
+    assert "Resume PDF is optional" in home.text
+    assert "/register-admin" not in home.text
+    assert "Talent reads" not in home.text
+
+    admin_page = pages[-1]
+    for response in pages[1:]:
         assert response.status_code in (200, 303, 302)
         if response.status_code != 200:
             continue
-        text = response.text.lower()
-        for needle in WAGE_NEEDLES:
-            assert needle not in text, f"{needle!r} found on page"
-        assert re.search(r"\$\s*\d", response.text) is None
-        assert "trussville" not in text
-        assert "/register-admin" not in text
-        assert "talent reads" not in text
+        body = response.text.lower()
+        assert "trussville" not in body
+        assert "/register-admin" not in body
+        assert "talent reads" not in body
+        if response is not admin_page:
+            for needle in WAGE_NEEDLES:
+                assert needle not in body, f"{needle!r} found on page"
+            assert re.search(r"\$\s*\d", response.text) is None
+            _assert_no_invented_openings(response.text)
         if response is not apply_form:
-            assert "application/pdf" not in text
-            assert 'type="file"' not in text
+            assert "application/pdf" not in body
+            assert 'type="file"' not in body
+    assert admin_page.status_code == 200
+    assert "Add a position" in admin_page.text
+    assert 'action="/admin/positions"' in admin_page.text
     assert apply_form.status_code == 200
     assert 'type="file"' in apply_form.text
     assert 'name="resume"' in apply_form.text
     assert "Resume (PDF, optional)" in apply_form.text
     assert "Talent reads" not in apply_form.text
     assert "A few sentences about why you want to work here." in apply_form.text
-    home = pages[0]
-    assert home.status_code == 200
-    assert "No resume file" not in home.text
-    assert "Resume PDF is optional" in home.text
-
-TINY_PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
-PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
-JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 24
-DOC_BYTES = b"\xd0\xcf\x11\xe0" + b"\x00" * 24
-DOCX_BYTES = b"PK\x03\x04" + b"\x00" * 24
+    assert "Counter / Cashier" in apply_form.text
 
 
 def test_home_no_longer_says_no_resume_file() -> None:
@@ -270,6 +325,93 @@ def test_home_no_longer_says_no_resume_file() -> None:
     assert home.status_code == 200
     assert "No resume file" not in home.text
     assert "Resume PDF is optional" in home.text
+    assert "$13/hour" in home.text
+    assert "40 hours/week" in home.text
+    assert "Counter / Cashier" in home.text
+    _assert_no_invented_openings(home.text)
+
+
+def test_admin_post_open_job_shows_on_home() -> None:
+    admin = _client()
+    logged = admin.post(
+        "/login",
+        data={"email": "admin@test.local", "password": "admin-test-password"},
+        follow_redirects=False,
+    )
+    assert logged.status_code in (302, 303)
+    page = admin.get("/admin")
+    assert page.status_code == 200
+    assert "Add a position" in page.text
+    assert "Counter / Cashier" in page.text
+    created = admin.post(
+        "/admin/positions",
+        data={
+            "title": "Pastry Cook",
+            "hours_per_week": "32",
+            "hourly_pay": "16",
+            "description": "Mix and shape pastry for the case.",
+            "open": "true",
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code in (302, 303)
+    assert created.headers["location"].endswith("/admin")
+    home = _client().get("/")
+    assert home.status_code == 200
+    assert "Pastry Cook" in home.text
+    assert "32" in home.text
+    assert "$16" in home.text
+    assert "Counter / Cashier" in home.text
+    assert "$13" in home.text
+
+
+def test_admin_can_close_position_and_it_disappears_from_home() -> None:
+    admin = _client()
+    logged = admin.post(
+        "/login",
+        data={"email": "admin@test.local", "password": "admin-test-password"},
+        follow_redirects=False,
+    )
+    assert logged.status_code in (302, 303)
+    admin.post(
+        "/admin/positions",
+        data={
+            "title": "Night Porter",
+            "hours_per_week": "25",
+            "hourly_pay": "15",
+            "open": "true",
+        },
+        follow_redirects=False,
+    )
+    store = open_store()
+    try:
+        row = next(p for p in store.list_positions() if p.title == "Night Porter")
+        pos_id = row.id
+    finally:
+        store.close()
+    home = _client().get("/")
+    assert home.status_code == 200
+    assert "Night Porter" in home.text
+    assert "Counter / Cashier" in home.text
+    closed = admin.post(
+        f"/admin/positions/{pos_id}",
+        data={"action": "close"},
+        follow_redirects=False,
+    )
+    assert closed.status_code in (302, 303)
+    gone = _client().get("/")
+    assert gone.status_code == 200
+    assert "Night Porter" not in gone.text
+    assert "Counter / Cashier" in gone.text
+    assert "$13" in gone.text
+    assert "40 hours/week" in gone.text
+
+
+TINY_PDF = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 24
+DOC_BYTES = b"\xd0\xcf\x11\xe0" + b"\x00" * 24
+DOCX_BYTES = b"PK\x03\x04" + b"\x00" * 24
 
 
 def test_apply_with_valid_resume_pdf_admin_can_download() -> None:

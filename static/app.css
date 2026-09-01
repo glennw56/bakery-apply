@@ -202,3 +202,15 @@ fieldset.yn legend {
 @media (max-width: 720px) {
   .dl { grid-template-columns: 1fr; }
 }
+.role-meta { font-weight: 700; }
+.role-closed { opacity: 0.72; }
+.inline-form { display: inline; margin-left: 0.4rem; }
+.check-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.check-row input[type="checkbox"] { width: auto; padding: 0; }

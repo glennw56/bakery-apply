@@ -110,6 +110,7 @@ def init_db() -> None:
         db_path().parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     _migrate_application_columns()
+    _migrate_position_columns()
 
 
 def _migrate_application_columns() -> None:
@@ -126,3 +127,19 @@ def _migrate_application_columns() -> None:
         for name, spec in APPLICATION_NEW_COLUMNS:
             if name not in existing:
                 conn.execute(text(f"ALTER TABLE applications ADD COLUMN {name} {spec}"))
+
+
+def _migrate_position_columns() -> None:
+    """ALTER TABLE ADD COLUMN if a local positions table already exists without new fields."""
+    from sqlalchemy import inspect, text
+
+    from app.models import POSITION_NEW_COLUMNS
+
+    inspector = inspect(engine)
+    if "positions" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("positions")}
+    with engine.begin() as conn:
+        for name, spec in POSITION_NEW_COLUMNS:
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE positions ADD COLUMN {name} {spec}"))

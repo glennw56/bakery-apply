@@ -11,11 +11,19 @@
     <p>Phone {{ shop_phone }}</p>
   </section>
 
-  <section class="role-card">
-    <h2>Live role</h2>
-    <p class="role-name">{{ live_role }}</p>
-    <p>Greet guests, help them pick from the case, ring up orders, keep the front clean, and learn the week's menu. Bakery or coffee experience is nice, not required. Weekends matter. This is a small family shop, not a chain.</p>
-  </section>
+  {% if open_positions %}
+    {% for p in open_positions %}
+      <section class="role-card" data-position-id="{{ p.id }}">
+        <h2 class="role-name">{{ p.title }}</h2>
+        <p class="role-meta">{{ p.hours_per_week }} hours/week · {{ p.hourly_pay_display }}</p>
+        {% if p.description %}
+          <p>{{ p.description }}</p>
+        {% endif %}
+      </section>
+    {% endfor %}
+  {% else %}
+    <p class="hint">No open positions right now.</p>
+  {% endif %}
 
   <p class="hint">One form. Resume PDF is optional. Create an account, then apply.</p>
   {% if user and user.is_admin %}

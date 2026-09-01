@@ -13,7 +13,16 @@ from sqlalchemy.orm import Session
 
 from app import db as sqlite_db
 from app.backend import resume_attachment_name, use_cloud_backend
-from app.models import STATUS_REVIEWED, Application, User
+from app.models import (
+    SEED_POSITION_DESCRIPTION,
+    SEED_POSITION_HOURS,
+    SEED_POSITION_PAY_CENTS,
+    SEED_POSITION_TITLE,
+    STATUS_REVIEWED,
+    Application,
+    Position,
+    User,
+)
 
 ROOT = sqlite_db.ROOT
 RESUMES_DIR = ROOT / "data" / "resumes"
@@ -114,6 +123,67 @@ class SqliteStore:
             filename=resume_attachment_name(application.name),
             content_disposition_type="attachment",
         )
+
+    def list_positions(self) -> list[Position]:
+        return list(self.db.scalars(select(Position).order_by(Position.id)).all())
+
+    def list_open_positions(self) -> list[Position]:
+        return list(
+            self.db.scalars(
+                select(Position).where(Position.open.is_(True)).order_by(Position.id)
+            ).all()
+        )
+
+    def get_position(self, position_id) -> Position | None:
+        try:
+            pid = int(position_id)
+        except (TypeError, ValueError):
+            return None
+        return self.db.get(Position, pid)
+
+    def create_position(
+        self,
+        title: str,
+        hours_per_week: int,
+        hourly_pay_cents: int,
+        open: bool = True,
+        description: str = "",
+    ) -> Position:
+        row = Position(
+            title=title.strip(),
+            hours_per_week=int(hours_per_week),
+            hourly_pay_cents=int(hourly_pay_cents),
+            open=bool(open),
+            description=(description or "").strip(),
+        )
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def update_position(self, position: Position, **fields) -> Position:
+        for key, value in fields.items():
+            setattr(position, key, value)
+        self.db.commit()
+        self.db.refresh(position)
+        return position
+
+
+def seed_positions() -> None:
+    """If the positions table/collection is empty, insert the Counter / Cashier opening."""
+    store = open_store()
+    try:
+        if store.list_positions():
+            return
+        store.create_position(
+            title=SEED_POSITION_TITLE,
+            hours_per_week=SEED_POSITION_HOURS,
+            hourly_pay_cents=SEED_POSITION_PAY_CENTS,
+            open=True,
+            description=SEED_POSITION_DESCRIPTION,
+        )
+    finally:
+        store.close()
 
 
 def open_store():

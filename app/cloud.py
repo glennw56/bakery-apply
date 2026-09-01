@@ -3,6 +3,7 @@
 google-cloud-* are imported inside CloudStore so local SQLite tests do not load them
 or need credentials. Users: collection `users` (email unique). Applications:
 FIRESTORE_COLLECTION (default `applications`), one per user_id.
+Positions: collection `positions`.
 PDFs: gs://$GCS_BUCKET/resumes/{id}.pdf — bucket stays private; admin download streams.
 """
 
@@ -20,9 +21,16 @@ from app.backend import (
     gcs_bucket,
     resume_attachment_name,
 )
-from app.models import HEAR_ABOUT_LABELS, ROLE_COUNTER, STATUS_REVIEWED, STATUS_SUBMITTED
+from app.models import (
+    HEAR_ABOUT_LABELS,
+    ROLE_COUNTER,
+    STATUS_REVIEWED,
+    STATUS_SUBMITTED,
+    format_hourly_pay,
+)
 
 USERS_COLLECTION = "users"
+POSITIONS_COLLECTION = "positions"
 
 
 def _naive_utc(dt) -> datetime | None:
@@ -51,6 +59,31 @@ class CloudUser:
         self.created_at = created_at
 
 
+class CloudPosition:
+    def __init__(self, id: str, data: dict) -> None:
+        self.id = id
+        self.title = data.get("title") or ""
+        self.hours_per_week = int(data.get("hours_per_week") or 0)
+        self.hourly_pay_cents = int(data.get("hourly_pay_cents") or 0)
+        self.open = bool(data.get("open"))
+        self.description = data.get("description") or ""
+
+    @property
+    def hourly_pay_display(self) -> str:
+        return format_hourly_pay(self.hourly_pay_cents)
+
+    @property
+    def hours_label(self) -> str:
+        return f"{int(self.hours_per_week)} hours/week"
+
+    @property
+    def pay_dollars_input(self) -> str:
+        cents = int(self.hourly_pay_cents)
+        if cents % 100 == 0:
+            return str(cents // 100)
+        return f"{cents / 100:.2f}"
+
+
 class CloudApplication:
     def __init__(self, id: str, data: dict) -> None:
         self.id = id
@@ -59,6 +92,7 @@ class CloudApplication:
         self.phone = data.get("phone") or ""
         self.availability = data.get("availability") or ""
         self.role = data.get("role") or ROLE_COUNTER
+        self.position_id = data.get("position_id") or ""
         self.weekends = data.get("weekends") or ""
         self.start_date = data.get("start_date") or ""
         self.hours_per_week = data.get("hours_per_week") or ""
@@ -114,6 +148,9 @@ class CloudStore:
 
     def _app_from_doc(self, doc) -> CloudApplication:
         return CloudApplication(doc.id, doc.to_dict() or {})
+
+    def _pos_from_doc(self, doc) -> CloudPosition:
+        return CloudPosition(doc.id, doc.to_dict() or {})
 
     def get_user_by_id(self, user_id) -> CloudUser | None:
         if user_id is None or user_id == "":
@@ -193,12 +230,14 @@ class CloudStore:
         submitted = fields.get("submitted_at") or datetime.now(timezone.utc)
         if isinstance(submitted, datetime) and submitted.tzinfo is None:
             submitted = submitted.replace(tzinfo=timezone.utc)
+        position_id = fields.get("position_id")
         payload = {
             "user_id": str(fields["user_id"]),
             "name": fields.get("name") or "",
             "phone": fields.get("phone") or "",
             "availability": fields.get("availability") or "",
             "role": fields.get("role") or ROLE_COUNTER,
+            "position_id": "" if position_id is None else str(position_id),
             "weekends": fields.get("weekends") or "",
             "start_date": fields.get("start_date") or "",
             "hours_per_week": fields.get("hours_per_week") or "",
@@ -272,3 +311,56 @@ class CloudStore:
                 )
             },
         )
+
+    def list_positions(self) -> list[CloudPosition]:
+        docs = self._fs.collection(POSITIONS_COLLECTION).stream()
+        rows = [self._pos_from_doc(doc) for doc in docs]
+        rows.sort(key=lambda p: (p.title.lower(), str(p.id)))
+        return rows
+
+    def list_open_positions(self) -> list[CloudPosition]:
+        return [p for p in self.list_positions() if p.open]
+
+    def get_position(self, position_id) -> CloudPosition | None:
+        if position_id is None or position_id == "":
+            return None
+        doc = self._fs.collection(POSITIONS_COLLECTION).document(str(position_id)).get()
+        if not doc.exists:
+            return None
+        return self._pos_from_doc(doc)
+
+    def create_position(
+        self,
+        title: str,
+        hours_per_week: int,
+        hourly_pay_cents: int,
+        open: bool = True,
+        description: str = "",
+    ) -> CloudPosition:
+        ref = self._fs.collection(POSITIONS_COLLECTION).document()
+        payload = {
+            "title": title.strip(),
+            "hours_per_week": int(hours_per_week),
+            "hourly_pay_cents": int(hourly_pay_cents),
+            "open": bool(open),
+            "description": (description or "").strip(),
+        }
+        ref.set(payload)
+        return CloudPosition(ref.id, payload)
+
+    def update_position(self, position: CloudPosition, **fields) -> CloudPosition:
+        payload = {}
+        for key in ("title", "hours_per_week", "hourly_pay_cents", "open", "description"):
+            if key in fields:
+                value = fields[key]
+                if key == "title" or key == "description":
+                    value = (value or "").strip() if isinstance(value, str) else value
+                elif key == "open":
+                    value = bool(value)
+                elif key in ("hours_per_week", "hourly_pay_cents"):
+                    value = int(value)
+                payload[key] = value
+                setattr(position, key, value)
+        if payload:
+            self._fs.collection(POSITIONS_COLLECTION).document(str(position.id)).update(payload)
+        return position

@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -36,11 +37,10 @@ from app.db import init_db
 from app.models import (
     HEAR_ABOUT_CHOICES,
     HEAR_ABOUT_SLUGS,
-    ROLE_COUNTER,
     STATUS_SUBMITTED,
     YES_NO,
 )
-from app.store import get_store
+from app.store import get_store, seed_positions
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = ROOT / "templates"
@@ -50,7 +50,6 @@ CHICAGO = ZoneInfo("America/Chicago")
 SHOP_NAME = "Sunshine's Bakery"
 SHOP_ADDRESS = "2231 1st Ave S, Irondale AL 35210"
 SHOP_PHONE = "(205) 602-3485"
-LIVE_ROLE = ROLE_COUNTER
 MAX_RESUME_BYTES = 5 * 1024 * 1024
 
 
@@ -65,6 +64,7 @@ SESSION_HTTPS_ONLY = session_https_only()
 async def lifespan(_app: FastAPI):
     init_db()
     seed_admin()
+    seed_positions()
     yield
 
 
@@ -107,7 +107,6 @@ templates.env.globals["chicago_stamp"] = chicago_stamp
 templates.env.globals["shop_name"] = SHOP_NAME
 templates.env.globals["shop_address"] = SHOP_ADDRESS
 templates.env.globals["shop_phone"] = SHOP_PHONE
-templates.env.globals["live_role"] = LIVE_ROLE
 templates.env.globals["hear_about_choices"] = HEAR_ABOUT_CHOICES
 
 
@@ -117,7 +116,6 @@ def _ctx(request: Request, user, **extra):
         "request": request,
         "user": user,
         "flash": flash,
-        "role_options": [LIVE_ROLE],
     }
     data.update(extra)
     return data
@@ -136,13 +134,45 @@ def _redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=303)
 
 
+def _parse_hours(raw: str) -> int | None:
+    raw = (raw or "").strip()
+    try:
+        hours = int(raw)
+    except ValueError:
+        return None
+    if hours < 0:
+        return None
+    return hours
+
+
+def _parse_pay_cents(raw: str) -> int | None:
+    """Admin form is dollars (13 or 13.50) stored as cents."""
+    raw = (raw or "").strip().replace("$", "").replace(",", "")
+    raw = raw.replace("/hour", "").replace("/hr", "").strip()
+    if not raw:
+        return None
+    try:
+        amount = Decimal(raw)
+    except InvalidOperation:
+        return None
+    if amount < 0:
+        return None
+    cents = (amount * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return int(cents)
+
+
+def _is_open_value(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "on", "yes")
+
+
 # --- Public hiring page -------------------------------------------------------
 
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, store=Depends(get_store)):
     user = get_current_user(request, store)
-    return render(request, "index.html", user)
+    open_positions = store.list_open_positions()
+    return render(request, "index.html", user, open_positions=open_positions)
 
 
 # --- Auth (applicant signup + login). No public admin register. ---------------
@@ -229,7 +259,8 @@ def apply_form(
     existing = store.get_application_for_user(user.id)
     if existing is not None:
         return _redirect("/application")
-    return render(request, "apply.html", user)
+    open_positions = store.list_open_positions()
+    return render(request, "apply.html", user, open_positions=open_positions)
 
 
 def _yes_no(value: str | None) -> str:
@@ -264,7 +295,7 @@ def apply_submit(
     name: str = Form(...),
     phone: str = Form(...),
     availability: str = Form(...),
-    role: str = Form(LIVE_ROLE),
+    position_id: str = Form(""),
     weekends: str = Form(""),
     start_date: str = Form(""),
     hours_per_week: str = Form(""),
@@ -315,19 +346,22 @@ def apply_submit(
         return _redirect("/apply")
     if prior_counter != "yes":
         prior_where = ""
+    position = store.get_position(position_id)
+    if position is None or not position.open:
+        _flash(request, "Pick an open position.")
+        return _redirect("/apply")
     try:
         resume_bytes = _optional_resume_bytes(resume)
     except ValueError as exc:
         _flash(request, str(exc))
         return _redirect("/apply")
-    # Only the live Counter / Cashier role is accepted in v1.
-    _ = role
     app_row = store.create_application(
         user_id=user.id,
         name=name,
         phone=phone,
         availability=availability,
-        role=LIVE_ROLE,
+        role=position.title,
+        position_id=position.id,
         weekends=weekends,
         start_date=start_date,
         hours_per_week=hours_per_week,
@@ -406,3 +440,121 @@ def admin_download_resume(
     if response is None:
         raise HTTPException(status_code=404, detail="Resume not found")
     return response
+
+
+@app.get("/admin/positions", response_class=HTMLResponse)
+def admin_positions(
+    request: Request,
+    admin=Depends(require_admin),
+    store=Depends(get_store),
+):
+    rows = store.list_positions()
+    return render(request, "admin/positions.html", admin, positions=rows)
+
+
+@app.post("/admin/positions")
+def admin_create_position(
+    request: Request,
+    title: str = Form(""),
+    hours_per_week: str = Form(""),
+    hourly_pay: str = Form(""),
+    description: str = Form(""),
+    open: str | None = Form(None),
+    admin=Depends(require_admin),
+    store=Depends(get_store),
+):
+    _ = admin
+    title = title.strip()
+    hours = _parse_hours(hours_per_week)
+    cents = _parse_pay_cents(hourly_pay)
+    if not title or hours is None or cents is None:
+        _flash(request, "Title, hours per week, and hourly pay (dollars) are required.")
+        return _redirect("/admin/positions")
+    store.create_position(
+        title=title,
+        hours_per_week=hours,
+        hourly_pay_cents=cents,
+        open=_is_open_value(open),
+        description=description.strip(),
+    )
+    _flash(request, "Position added.")
+    return _redirect("/admin/positions")
+
+
+@app.post("/admin/positions/{pos_id}/close")
+def admin_close_position(
+    pos_id: str,
+    request: Request,
+    admin=Depends(require_admin),
+    store=Depends(get_store),
+):
+    _ = admin
+    row = store.get_position(pos_id)
+    if row is None:
+        _flash(request, "Position not found.")
+        return _redirect("/admin/positions")
+    store.update_position(row, open=False)
+    _flash(request, "Position closed. It is hidden from the public hiring page.")
+    return _redirect("/admin/positions")
+
+
+@app.post("/admin/positions/{pos_id}/open")
+def admin_reopen_position(
+    pos_id: str,
+    request: Request,
+    admin=Depends(require_admin),
+    store=Depends(get_store),
+):
+    _ = admin
+    row = store.get_position(pos_id)
+    if row is None:
+        _flash(request, "Position not found.")
+        return _redirect("/admin/positions")
+    store.update_position(row, open=True)
+    _flash(request, "Position reopened.")
+    return _redirect("/admin/positions")
+
+
+@app.post("/admin/positions/{pos_id}")
+def admin_update_position(
+    pos_id: str,
+    request: Request,
+    title: str = Form(""),
+    hours_per_week: str = Form(""),
+    hourly_pay: str = Form(""),
+    description: str = Form(""),
+    open: str | None = Form(None),
+    action: str = Form(""),
+    admin=Depends(require_admin),
+    store=Depends(get_store),
+):
+    _ = admin
+    row = store.get_position(pos_id)
+    if row is None:
+        _flash(request, "Position not found.")
+        return _redirect("/admin/positions")
+    action = (action or "").strip().lower()
+    if action == "close":
+        store.update_position(row, open=False)
+        _flash(request, "Position closed. It is hidden from the public hiring page.")
+        return _redirect("/admin/positions")
+    if action == "reopen":
+        store.update_position(row, open=True)
+        _flash(request, "Position reopened.")
+        return _redirect("/admin/positions")
+    title = title.strip()
+    hours = _parse_hours(hours_per_week)
+    cents = _parse_pay_cents(hourly_pay)
+    if not title or hours is None or cents is None:
+        _flash(request, "Title, hours per week, and hourly pay (dollars) are required.")
+        return _redirect("/admin/positions")
+    store.update_position(
+        row,
+        title=title,
+        hours_per_week=hours,
+        hourly_pay_cents=cents,
+        open=_is_open_value(open),
+        description=description.strip(),
+    )
+    _flash(request, "Position saved.")
+    return _redirect("/admin/positions")

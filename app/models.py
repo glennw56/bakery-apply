@@ -61,7 +61,7 @@ class User(Base):
 
 
 class Application(Base):
-    """One job application per account. Optional resume PDF on local disk."""
+    """One job application per account. Optional resume PDF (local disk or GCS)."""
 
     __tablename__ = "applications"
     __table_args__ = (UniqueConstraint("user_id", name="uq_applications_user_id"),)

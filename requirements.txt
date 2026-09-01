@@ -8,3 +8,5 @@ python-multipart>=0.0.12
 passlib[bcrypt]>=1.7.4
 bcrypt>=4.0.0,<4.1.0
 itsdangerous>=2.2.0
+google-cloud-firestore>=2.19.0
+google-cloud-storage>=2.18.0

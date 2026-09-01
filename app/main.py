@@ -13,11 +13,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import (
@@ -33,17 +31,16 @@ from app.auth import (
     seed_admin,
     verify_password,
 )
-from app.db import get_db, init_db
+from app.backend import session_https_only
+from app.db import init_db
 from app.models import (
     HEAR_ABOUT_CHOICES,
     HEAR_ABOUT_SLUGS,
     ROLE_COUNTER,
-    STATUS_REVIEWED,
     STATUS_SUBMITTED,
     YES_NO,
-    Application,
-    User,
 )
+from app.store import get_store
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = ROOT / "templates"
@@ -54,12 +51,14 @@ SHOP_NAME = "Sunshine's Bakery"
 SHOP_ADDRESS = "2231 1st Ave S, Irondale AL 35210"
 SHOP_PHONE = "(205) 602-3485"
 LIVE_ROLE = ROLE_COUNTER
-RESUMES_DIR = ROOT / "data" / "resumes"
 MAX_RESUME_BYTES = 5 * 1024 * 1024
 
 
 def session_secret() -> str:
     return os.environ.get("SESSION_SECRET") or "local-dev-change-me"
+
+
+SESSION_HTTPS_ONLY = session_https_only()
 
 
 @asynccontextmanager
@@ -69,13 +68,19 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Sunshine's Bakery Apply", lifespan=lifespan)
+app = FastAPI(
+    title="Sunshine's Bakery Apply",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.add_middleware(
     SessionMiddleware,
     secret_key=session_secret(),
     session_cookie="bakery_apply",
     same_site="lax",
-    https_only=False,
+    https_only=SESSION_HTTPS_ONLY,
 )
 app.add_exception_handler(LoginRedirect, login_redirect_handler)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -106,7 +111,7 @@ templates.env.globals["live_role"] = LIVE_ROLE
 templates.env.globals["hear_about_choices"] = HEAR_ABOUT_CHOICES
 
 
-def _ctx(request: Request, user: User | None, **extra):
+def _ctx(request: Request, user, **extra):
     flash = request.session.pop("flash", None)
     data = {
         "request": request,
@@ -118,7 +123,7 @@ def _ctx(request: Request, user: User | None, **extra):
     return data
 
 
-def render(request: Request, name: str, user: User | None, **extra):
+def render(request: Request, name: str, user, **extra):
     """Starlette 1.x: TemplateResponse(request, name, context)."""
     return templates.TemplateResponse(request, name, _ctx(request, user, **extra))
 
@@ -135,8 +140,8 @@ def _redirect(url: str) -> RedirectResponse:
 
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user(request, db)
+def home(request: Request, store=Depends(get_store)):
+    user = get_current_user(request, store)
     return render(request, "index.html", user)
 
 
@@ -144,8 +149,8 @@ def home(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/signup", response_class=HTMLResponse)
-def signup_form(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user(request, db)
+def signup_form(request: Request, store=Depends(get_store)):
+    user = get_current_user(request, store)
     if user is not None:
         return _redirect("/apply" if not user.is_admin else "/admin")
     return render(request, "signup.html", user)
@@ -157,7 +162,7 @@ def signup(
     email: str = Form(...),
     password: str = Form(...),
     is_admin: str | None = Form(None),  # ignored — public cannot register as admin
-    db: Session = Depends(get_db),
+    store=Depends(get_store),
 ):
     _ = is_admin  # never honored
     email_n = normalize_email(email)
@@ -167,21 +172,18 @@ def signup(
     if len(password) < 8:
         _flash(request, "Password must be at least 8 characters.")
         return _redirect("/signup")
-    existing = db.scalar(select(User).where(User.email == email_n))
+    existing = store.get_user_by_email(email_n)
     if existing is not None:
         _flash(request, "That email already has an account. Log in instead.")
         return _redirect("/login")
-    user = User(email=email_n, password_hash=hash_password(password), is_admin=False)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    user = store.create_user(email_n, hash_password(password), is_admin=False)
     login_user(request, user)
     return _redirect("/apply")
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_form(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user(request, db)
+def login_form(request: Request, store=Depends(get_store)):
+    user = get_current_user(request, store)
     if user is not None:
         return _redirect("/admin" if user.is_admin else "/apply")
     return render(request, "login.html", user)
@@ -192,17 +194,17 @@ def login(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
-    db: Session = Depends(get_db),
+    store=Depends(get_store),
 ):
     email_n = normalize_email(email)
-    user = db.scalar(select(User).where(User.email == email_n))
+    user = store.get_user_by_email(email_n)
     if user is None or not verify_password(password, user.password_hash):
         _flash(request, "Email or password did not match.")
         return _redirect("/login")
     login_user(request, user)
     if user.is_admin:
         return _redirect("/admin")
-    if user.application is not None:
+    if store.get_application_for_user(user.id) is not None:
         return _redirect("/application")
     return _redirect("/apply")
 
@@ -219,12 +221,12 @@ def logout(request: Request):
 @app.get("/apply", response_class=HTMLResponse)
 def apply_form(
     request: Request,
-    user: User = Depends(require_login),
-    db: Session = Depends(get_db),
+    user=Depends(require_login),
+    store=Depends(get_store),
 ):
     if user.is_admin:
         return _redirect("/admin")
-    existing = db.scalar(select(Application).where(Application.user_id == user.id))
+    existing = store.get_application_for_user(user.id)
     if existing is not None:
         return _redirect("/application")
     return render(request, "apply.html", user)
@@ -256,19 +258,6 @@ def _optional_resume_bytes(upload: UploadFile | None) -> bytes | None:
     return blob
 
 
-def _store_resume(app_id: int, blob: bytes) -> str:
-    RESUMES_DIR.mkdir(parents=True, exist_ok=True)
-    rel = f"data/resumes/{app_id}.pdf"
-    (ROOT / rel).write_bytes(blob)
-    return rel
-
-
-def _resume_attachment_name(name: str) -> str:
-    cleaned = "".join(c if c.isalnum() or c in " -_" else "-" for c in (name or "").strip())
-    cleaned = cleaned.strip(" -_") or "applicant"
-    return f"{cleaned}-resume.pdf"
-
-
 @app.post("/apply")
 def apply_submit(
     request: Request,
@@ -287,12 +276,12 @@ def apply_submit(
     why_shop: str = Form(""),
     hear_about: str = Form(""),
     resume: UploadFile | None = File(None),
-    user: User = Depends(require_login),
-    db: Session = Depends(get_db),
+    user=Depends(require_login),
+    store=Depends(get_store),
 ):
     if user.is_admin:
         return _redirect("/admin")
-    existing = db.scalar(select(Application).where(Application.user_id == user.id))
+    existing = store.get_application_for_user(user.id)
     if existing is not None:
         return _redirect("/application")
     name = name.strip()
@@ -333,7 +322,7 @@ def apply_submit(
         return _redirect("/apply")
     # Only the live Counter / Cashier role is accepted in v1.
     _ = role
-    app_row = Application(
+    app_row = store.create_application(
         user_id=user.id,
         name=name,
         phone=phone,
@@ -352,24 +341,20 @@ def apply_submit(
         status=STATUS_SUBMITTED,
         submitted_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
-    db.add(app_row)
-    db.commit()
-    db.refresh(app_row)
     if resume_bytes:
-        app_row.resume_path = _store_resume(app_row.id, resume_bytes)
-        db.commit()
+        store.save_resume(app_row, resume_bytes)
     return _redirect("/application")
 
 
 @app.get("/application", response_class=HTMLResponse)
 def my_application(
     request: Request,
-    user: User = Depends(require_login),
-    db: Session = Depends(get_db),
+    user=Depends(require_login),
+    store=Depends(get_store),
 ):
     if user.is_admin:
         return _redirect("/admin")
-    existing = db.scalar(select(Application).where(Application.user_id == user.id))
+    existing = store.get_application_for_user(user.id)
     if existing is None:
         return _redirect("/apply")
     return render(request, "application.html", user, application=existing)
@@ -381,30 +366,27 @@ def my_application(
 @app.get("/admin", response_class=HTMLResponse)
 def admin_list(
     request: Request,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+    store=Depends(get_store),
 ):
-    rows = db.scalars(select(Application).order_by(Application.submitted_at.desc())).all()
+    rows = store.list_applications()
     return render(request, "admin/index.html", admin, applications=rows)
 
 
 @app.post("/admin/applications/{app_id}/review", response_class=HTMLResponse)
 def admin_mark_reviewed(
-    app_id: int,
+    app_id: str,
     request: Request,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+    store=Depends(get_store),
 ):
-    row = db.get(Application, app_id)
+    row = store.get_application(app_id)
     if row is None:
         if _is_htmx(request):
             return HTMLResponse("", status_code=404)
         _flash(request, "Application not found.")
         return _redirect("/admin")
-    row.status = STATUS_REVIEWED
-    row.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    db.commit()
-    db.refresh(row)
+    row = store.mark_reviewed(row)
     if _is_htmx(request):
         return render(request, "admin/_row.html", admin, item=row)
     return _redirect("/admin")
@@ -412,23 +394,15 @@ def admin_mark_reviewed(
 
 @app.get("/admin/applications/{app_id}/resume")
 def admin_download_resume(
-    app_id: int,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
+    app_id: str,
+    admin=Depends(require_admin),
+    store=Depends(get_store),
 ):
     _ = admin
-    row = db.get(Application, app_id)
-    if row is None or not (row.resume_path or "").strip():
+    row = store.get_application(app_id)
+    if row is None:
         raise HTTPException(status_code=404, detail="Resume not found")
-    path = (ROOT / row.resume_path).resolve()
-    resumes_root = RESUMES_DIR.resolve()
-    if path != resumes_root and resumes_root not in path.parents:
+    response = store.resume_response(row)
+    if response is None:
         raise HTTPException(status_code=404, detail="Resume not found")
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Resume not found")
-    return FileResponse(
-        path,
-        media_type="application/pdf",
-        filename=_resume_attachment_name(row.name),
-        content_disposition_type="attachment",
-    )
+    return response

@@ -11,6 +11,12 @@ _fd, _db = tempfile.mkstemp(suffix=".db")
 os.close(_fd)
 os.environ["BAKERY_APPLY_DB"] = _db
 os.environ.pop("DATABASE_URL", None)
+os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
+os.environ.pop("GCP_PROJECT", None)
+os.environ.pop("GCS_BUCKET", None)
+os.environ.pop("FIRESTORE_COLLECTION", None)
+os.environ.pop("K_SERVICE", None)
+os.environ.pop("SESSION_HTTPS", None)
 os.environ["SESSION_SECRET"] = "test-secret-not-for-production"
 os.environ["ADMIN_EMAIL"] = "admin@test.local"
 os.environ["ADMIN_PASSWORD"] = "admin-test-password"
@@ -352,3 +358,64 @@ def test_unauthenticated_cannot_download_resume() -> None:
     assert response.status_code in (302, 303, 401, 403)
     if response.status_code in (302, 303):
         assert "/login" in response.headers.get("location", "")
+
+
+def test_docs_and_openapi_are_disabled() -> None:
+    client = _client()
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+
+
+def test_session_https_only_false_without_k_service() -> None:
+    assert not os.environ.get("K_SERVICE")
+    assert os.environ.get("SESSION_HTTPS") not in ("1", "true", "TRUE")
+    from app.backend import session_https_only
+    from app.main import SESSION_HTTPS_ONLY
+    from starlette.middleware.sessions import SessionMiddleware
+
+    assert session_https_only() is False
+    assert SESSION_HTTPS_ONLY is False
+    found = False
+    for middleware in app.user_middleware:
+        if getattr(middleware, "cls", None) is SessionMiddleware:
+            assert middleware.kwargs.get("https_only") is False
+            found = True
+    assert found
+
+
+def test_cloud_backend_off_without_project_and_bucket() -> None:
+    from app.backend import use_cloud_backend
+
+    assert use_cloud_backend() is False
+    import sys
+
+    assert "google.cloud.firestore" not in sys.modules
+    assert "google.cloud.storage" not in sys.modules
+    assert "app.cloud" not in sys.modules
+
+
+def test_cloud_backend_requires_both_env_vars(monkeypatch) -> None:
+    from app.backend import firestore_collection, session_https_only, use_cloud_backend
+
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "bakery-444323")
+    monkeypatch.delenv("GCS_BUCKET", raising=False)
+    assert use_cloud_backend() is False
+    monkeypatch.setenv("GCS_BUCKET", "private-bucket")
+    assert use_cloud_backend() is True
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    monkeypatch.setenv("GCP_PROJECT", "bakery-444323")
+    assert use_cloud_backend() is True
+    monkeypatch.delenv("GCP_PROJECT", raising=False)
+    assert use_cloud_backend() is False
+    monkeypatch.delenv("FIRESTORE_COLLECTION", raising=False)
+    assert firestore_collection() == "applications"
+    monkeypatch.setenv("K_SERVICE", "bakery-apply")
+    assert session_https_only() is True
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.setenv("SESSION_HTTPS", "1")
+    assert session_https_only() is True
+    import sys
+
+    assert "google.cloud.firestore" not in sys.modules
+    assert "google.cloud.storage" not in sys.modules

@@ -7,11 +7,8 @@ import os
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from passlib.context import CryptContext
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.db import SessionLocal, get_db
-from app.models import User
+from app.store import get_store, open_store
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -31,35 +28,30 @@ def normalize_email(email: str) -> str:
 
 
 def seed_admin() -> None:
-    """Create or update the env admin (ADMIN_EMAIL + ADMIN_PASSWORD) with is_admin=true."""
+    """Create or update the env admin (ADMIN_EMAIL + ADMIN_PASSWORD) with is_admin=true.
+
+    Works for SQLite and Firestore. Cloud clients stay lazy inside open_store().
+    """
     email = os.environ.get("ADMIN_EMAIL", "").strip()
     password = os.environ.get("ADMIN_PASSWORD", "")
     if not email or not password:
         return
     email = normalize_email(email)
-    db = SessionLocal()
+    store = open_store()
     try:
-        user = db.scalar(select(User).where(User.email == email))
-        hashed = hash_password(password)
-        if user is None:
-            user = User(email=email, password_hash=hashed, is_admin=True)
-            db.add(user)
-        else:
-            user.password_hash = hashed
-            user.is_admin = True
-        db.commit()
+        store.upsert_admin(email, hash_password(password))
     finally:
-        db.close()
+        store.close()
 
 
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+def get_current_user(request: Request, store=Depends(get_store)):
     user_id = request.session.get(SESSION_USER_KEY)
     if not user_id:
         return None
-    return db.get(User, int(user_id))
+    return store.get_user_by_id(user_id)
 
 
-def require_user(user: User | None = Depends(get_current_user)) -> User:
+def require_user(user=Depends(get_current_user)):
     if user is None:
         raise HTTPException(status_code=401, detail="Login required")
     return user
@@ -72,15 +64,15 @@ class LoginRedirect(Exception):
         self.next_path = next_path
 
 
-def require_login(request: Request, db: Session = Depends(get_db)) -> User:
-    user = get_current_user(request, db)
+def require_login(request: Request, store=Depends(get_store)):
+    user = get_current_user(request, store)
     if user is None:
         raise LoginRedirect(str(request.url.path))
     return user
 
 
-def require_admin(request: Request, db: Session = Depends(get_db)) -> User:
-    user = get_current_user(request, db)
+def require_admin(request: Request, store=Depends(get_store)):
+    user = get_current_user(request, store)
     if user is None:
         raise LoginRedirect("/admin")
     if not user.is_admin:
@@ -92,7 +84,7 @@ def login_redirect_handler(_request: Request, exc: LoginRedirect) -> RedirectRes
     return RedirectResponse(url="/login", status_code=303)
 
 
-def login_user(request: Request, user: User) -> None:
+def login_user(request: Request, user) -> None:
     request.session[SESSION_USER_KEY] = user.id
 
 

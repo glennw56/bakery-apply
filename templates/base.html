@@ -4,12 +4,30 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Sunshine's Bakery{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/htmx.min.js"></script>
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <header class="site-header">
-    <a href="/" class="brand">Sunshine's Bakery</a>
+    <a href="/" class="brand">
+      <svg class="brand-sun" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2" fill="#e4b23c"/>
+        <g stroke="#e4b23c" stroke-width="1.7" stroke-linecap="round">
+          <line x1="12" y1="2.2" x2="12" y2="5"/>
+          <line x1="12" y1="19" x2="12" y2="21.8"/>
+          <line x1="2.2" y1="12" x2="5" y2="12"/>
+          <line x1="19" y1="12" x2="21.8" y2="12"/>
+          <line x1="5.05" y1="5.05" x2="7.1" y2="7.1"/>
+          <line x1="16.9" y1="16.9" x2="18.95" y2="18.95"/>
+          <line x1="5.05" y1="18.95" x2="7.1" y2="16.9"/>
+          <line x1="16.9" y1="7.1" x2="18.95" y2="5.05"/>
+        </g>
+      </svg>
+      Sunshine's Bakery
+    </a>
     <nav>
       <a href="/">Hiring</a>
       {% if user and user.is_admin %}
@@ -34,5 +52,8 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  <footer class="site-footer">
+    <p>{{ shop_address }} · {{ shop_phone }} · <a href="https://www.instagram.com/sunshinebakeshop99/">Instagram @sunshinebakeshop99</a></p>
+  </footer>
 </body>
 </html>

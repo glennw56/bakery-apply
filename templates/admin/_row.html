@@ -1,6 +1,7 @@
 <article class="shop-card app-card" id="app-{{ item.id }}">
   <header>
     <p><strong>{{ item.name }}</strong> · {{ item.phone }}</p>
+    <p>Email {{ item.applicant_email }}</p>
     <p class="status status-{{ item.status }}">{{ item.status }}</p>
   </header>
   <p>Role {{ item.role }} · Availability: {{ item.availability }}</p>

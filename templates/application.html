@@ -31,7 +31,7 @@
       <dd>{{ application.hear_about_label }}</dd>
     </dl>
     {% if application.resume_path %}
-      <p>Resume attached (PDF)</p>
+      <p><a href="/application/resume">Download resume (PDF)</a></p>
     {% endif %}
     <p>Submitted {{ chicago_stamp(application.submitted_at) }}</p>
     <p class="status status-{{ application.status }}">Status: {{ application.status }}</p>

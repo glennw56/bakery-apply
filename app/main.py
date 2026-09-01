@@ -134,6 +134,13 @@ def _redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=303)
 
 
+def _attach_applicant_email(store, row):
+    """Set row.applicant_email from the signup User; empty string if missing."""
+    user = store.get_user_by_id(row.user_id)
+    row.applicant_email = (user.email if user is not None else "") or ""
+    return row
+
+
 def _parse_hours(raw: str) -> int | None:
     raw = (raw or "").strip()
     try:
@@ -394,6 +401,22 @@ def my_application(
     return render(request, "application.html", user, application=existing)
 
 
+@app.get("/application/resume")
+def application_resume(
+    user=Depends(require_login),
+    store=Depends(get_store),
+):
+    if user.is_admin:
+        return _redirect("/admin")
+    row = store.get_application_for_user(user.id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    response = store.resume_response(row)
+    if response is None:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return response
+
+
 # --- Admin: seeded from env, not public self-serve ----------------------------
 
 
@@ -404,6 +427,8 @@ def admin_list(
     store=Depends(get_store),
 ):
     rows = store.list_applications()
+    for row in rows:
+        _attach_applicant_email(store, row)
     positions = store.list_positions()
     return render(
         request,
@@ -429,6 +454,7 @@ def admin_mark_reviewed(
         return _redirect("/admin")
     row = store.mark_reviewed(row)
     if _is_htmx(request):
+        _attach_applicant_email(store, row)
         return render(request, "admin/_row.html", admin, item=row)
     return _redirect("/admin")
 

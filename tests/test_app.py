@@ -194,6 +194,7 @@ def test_admin_can_list_apps() -> None:
     assert WHY_SHOP in page.text
     assert "Daily Bread Cafe" in page.text
     assert "Instagram" in page.text
+    assert "listed@example.com" in page.text
     assert "register-admin" not in page.text
 
     marked = admin.post(
@@ -211,6 +212,8 @@ def test_admin_can_list_apps() -> None:
     assert marked.status_code == 200
     assert "reviewed" in marked.text.lower()
     assert WHY_SHOP in marked.text
+    if "Sam Irondale" in marked.text:
+        assert "listed@example.com" in marked.text
 
 
 def test_unauthenticated_cannot_hit_admin() -> None:
@@ -422,9 +425,14 @@ def test_apply_with_valid_resume_pdf_admin_can_download() -> None:
     )
     assert created.status_code == 200
     assert "Pat Pdf" in created.text
-    assert "Resume attached (PDF)" in created.text
+    assert 'href="/application/resume"' in created.text
     assert "/data/resumes" not in created.text
     assert 'href="/admin/applications/' not in created.text
+
+    own = client.get("/application/resume")
+    assert own.status_code == 200
+    assert own.headers.get("content-type", "").split(";")[0].strip() == "application/pdf"
+    assert own.content.startswith(b"%PDF")
 
     admin = _client()
     logged = admin.post(
@@ -488,7 +496,7 @@ def test_empty_content_type_pdf_is_accepted() -> None:
         follow_redirects=True,
     )
     assert created.status_code == 200
-    assert "Resume attached (PDF)" in created.text
+    assert 'href="/application/resume"' in created.text
 
 
 def test_unauthenticated_cannot_download_resume() -> None:
@@ -497,6 +505,34 @@ def test_unauthenticated_cannot_download_resume() -> None:
     assert response.status_code in (302, 303, 401, 403)
     if response.status_code in (302, 303):
         assert "/login" in response.headers.get("location", "")
+
+
+def test_applicant_resume_is_own_only() -> None:
+    """Anonymous users bounce to login; another applicant never gets this PDF."""
+    owner = _client()
+    _signup(owner, "resume-owner@example.com")
+    created = owner.post(
+        "/apply",
+        data=_apply_data(name="Owner Pdf"),
+        files={"resume": ("resume.pdf", TINY_PDF, "application/pdf")},
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    assert 'href="/application/resume"' in created.text
+    own = owner.get("/application/resume")
+    assert own.status_code == 200
+    assert own.content.startswith(b"%PDF")
+
+    anon = _client()
+    bounced = anon.get("/application/resume", follow_redirects=False)
+    assert bounced.status_code in (302, 303)
+    assert "/login" in bounced.headers.get("location", "")
+
+    other = _client()
+    _signup(other, "resume-other@example.com")
+    other_get = other.get("/application/resume", follow_redirects=False)
+    assert other_get.status_code == 404
+    assert not other_get.content.startswith(b"%PDF")
 
 
 def test_docs_and_openapi_are_disabled() -> None:

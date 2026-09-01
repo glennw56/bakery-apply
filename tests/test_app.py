@@ -215,11 +215,10 @@ def test_admin_can_list_apps() -> None:
 
 def test_unauthenticated_cannot_hit_admin() -> None:
     anon = _client()
-    for path in ("/admin", "/admin/positions"):
-        response = anon.get(path, follow_redirects=False)
-        assert response.status_code in (302, 303, 401, 403)
-        if response.status_code in (302, 303):
-            assert "/login" in response.headers.get("location", "")
+    response = anon.get("/admin", follow_redirects=False)
+    assert response.status_code in (302, 303, 401, 403)
+    if response.status_code in (302, 303):
+        assert "/login" in response.headers.get("location", "")
     posted = anon.post(
         "/admin/positions",
         data={
@@ -259,8 +258,6 @@ def test_public_cannot_register_as_admin() -> None:
     )
     admin_page = client.get("/admin", follow_redirects=False)
     assert admin_page.status_code in (302, 303, 401, 403)
-    positions = client.get("/admin/positions", follow_redirects=False)
-    assert positions.status_code in (302, 303, 401, 403)
 
 
 def test_no_wage_text_on_pages() -> None:

@@ -10,7 +10,7 @@ Public job-apply site for **Sunshine's Bakery** (Irondale, AL). Openings live in
 
 **Not in git:** `.env`, the live sqlite file, resume PDFs, Square tokens / API keys (this app does not use Square). `data/*` is gitignored except `data/.gitkeep`. Copy `.env.example` to `.env` and set `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
 
-v1 does **not** post jobs or email candidates. Open positions show hours/week and hourly pay (seeded Counter / Cashier is 40 hours/week and $13/hour). There is no second location, no public `/register-admin`, and no invented extra openings (no Baker, no Manager). An optional resume PDF can be uploaded on the apply form (`%PDF` magic, 5 MB max). `/docs`, `/redoc`, and `/openapi.json` are disabled (404).
+v1 does **not** email candidates. There is no public self-serve job posting — only the seeded admin can add, edit, close, or reopen positions on `/admin`. Open positions show hours/week and hourly pay (seeded Counter / Cashier is 40 hours/week and $13/hour). There is no second location, no public `/register-admin`, and no invented extra openings on startup (exactly one seed). An optional resume PDF can be uploaded on the apply form (`%PDF` magic, 5 MB max). `/docs`, `/redoc`, and `/openapi.json` are disabled (404).
 
 ## Quick start
 
@@ -25,7 +25,7 @@ Open http://127.0.0.1:8000
 
 `setup.sh` creates `.venv`, installs `requirements.txt`, copies `.env.example` → `.env` if missing, and makes `data/`. `run.sh` sources `.env` and starts uvicorn (`HOST=127.0.0.1`, `PORT=8000`, `RELOAD=1` by default). Same thing via `make setup` then `make run`.
 
-Admin is **not** a public signup. On startup the app creates/updates the user in `ADMIN_EMAIL` with `ADMIN_PASSWORD` and `is_admin=true`. If there are no positions yet, it seeds one open Counter / Cashier (40 hours/week, $13/hour). Log in at `/login`, then `/admin` (applications) or `/admin/positions`.
+Admin is **not** a public signup. On startup the app creates/updates the user in `ADMIN_EMAIL` with `ADMIN_PASSWORD` and `is_admin=true`. If there are no positions yet, it seeds one open Counter / Cashier (40 hours/week, $13/hour). Log in at `/login`, then `/admin` (add/edit/close positions at the top, applications below). Positions are not on public nav.
 
 htmx 2.x is vendored at `static/htmx.min.js` (offline).
 
@@ -39,10 +39,15 @@ htmx 2.x is vendored at `static/htmx.min.js` (offline).
 | `POST /logout` | Clear session |
 | `GET`/`POST /apply` | Logged-in applicant form: pick an open position, name, phone, availability, Talent screening, optional resume PDF. Stores `position_id` plus a title snapshot on `role` |
 | `GET /application` | Own application + status (`submitted` / `reviewed`). Shows “Resume attached (PDF)” if a file was uploaded; does not serve the file |
-| `GET /admin` | Admin-only list (name, phone, availability, role snapshot, submitted_at, status) |
-| `GET`/`POST /admin/positions` | Admin-only add / edit / close / reopen openings. Not on public nav |
+| `GET /admin` | Admin-only: add-position form, all positions (edit / close / reopen), then applications |
+| `POST /admin/positions` | Admin-only create (`require_admin`). Hourly pay is dollars in the form, cents in storage |
+| `POST /admin/positions/{id}` | Admin-only edit |
+| `POST /admin/positions/{id}/close` | Admin-only close (hidden on `/`) |
+| `POST /admin/positions/{id}/reopen` | Admin-only reopen |
 | `POST /admin/applications/{id}/review` | Mark reviewed (HTMX swaps the row) |
 | `GET /admin/applications/{id}/resume` | Admin-only PDF download (`{name}-resume.pdf`). 404 if none. Streams from local disk or GCS. `/data/resumes` is not a public static path |
+| `POST /admin/positions` | Admin create position (title, hours/week, hourly pay in dollars, optional description, open) |
+| `POST /admin/positions/{id}` | Admin update, close, or reopen a position |
 
 Unauthenticated `/admin` redirects to `/login`. There is no `/register-admin`.
 
@@ -87,7 +92,7 @@ docker compose up --build
 ./scripts/test.sh
 ```
 
-Or `make test`, or `PYTHONPATH=. .venv/bin/pytest -q`. Uses a throwaway sqlite file (`BAKERY_APPLY_DB` tempfile); does not touch `data/app.db`. GCP clients are lazy-imported, so local tests do not need credentials. Covers signup, login, submit application (with and without optional PDF) picking Counter / Cashier, rejected non-PDF, admin list + resume download, unauthenticated `/admin` and resume GET, no public admin register, home shows `$13/hour` and `40 hours/week` for the seeded open role (no Baker / Manager), admin can close a position and it disappears from home, `/docs` and `/openapi.json` 404, session `https_only` false without `K_SERVICE`.
+Or `make test`, or `PYTHONPATH=. .venv/bin/pytest -q`. Uses a throwaway sqlite file (`BAKERY_APPLY_DB` tempfile); does not touch `data/app.db`. GCP clients are lazy-imported, so local tests do not need credentials. Covers signup, login, submit application (with and without optional PDF) picking Counter / Cashier, rejected non-PDF, admin list + resume download, unauthenticated `/admin` and resume GET, no public admin register, home shows `$13/hour` and `40 hours/week` for the seeded Counter / Cashier, admin can POST a new open position onto home, closing hides it, unauthenticated cannot POST positions, `/docs` and `/openapi.json` 404, session `https_only` false without `K_SERVICE`.
 
 ## Env
 

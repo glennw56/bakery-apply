@@ -1,18 +1,24 @@
 {% extends "base.html" %}
-{% block title %}Log in · Sunshine's Bakery{% endblock %}
+{% block title %}Log in to apply · Sunshine's Bakery{% endblock %}
 {% block content %}
-  <h1>Log in</h1>
-  <p class="lede">Sign in with Google to apply with a verified email.</p>
+  <h1>Log in to apply</h1>
+  <p class="lede">You need an account to submit an application. Sign in with Google, or use your email.</p>
   {% include "_google_signin.html" %}
   <p class="auth-divider">or use email</p>
   <form class="note-form" method="post" action="/login">
+    {% if position_id %}
+      <input type="hidden" name="position_id" value="{{ position_id }}">
+    {% endif %}
+    {% if auth_next %}
+      <input type="hidden" name="next" value="{{ auth_next }}">
+    {% endif %}
     <label>Email
       <input type="email" name="email" required autocomplete="email">
     </label>
     <label>Password
       <input type="password" name="password" required autocomplete="current-password">
     </label>
-    <button type="submit">Log in</button>
+    <button type="submit">Log in to apply</button>
   </form>
-  <p class="hint">New here? <a href="/signup">Sign up</a>.</p>
+  <p class="hint">New here? <a href="/signup{{ auth_query }}">Sign up to apply</a>.</p>
 {% endblock %}

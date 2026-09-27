@@ -5,6 +5,15 @@
   <h1>We're hiring</h1>
   <p class="lede">Sunshine's Bakery is a small neighborhood shop in downtown Irondale. We bake pastries, bread, and cookies, and we serve coffee, boba, and lemonades. We want the shop to feel like a place neighbors are glad they stopped.</p>
 
+  <section class="how-to-apply" aria-labelledby="how-to-apply-heading">
+    <h2 id="how-to-apply-heading">How to apply</h2>
+    <ol>
+      <li>Pick a job.</li>
+      <li>Log in to apply.</li>
+      <li>Submit the form. Resume PDF is optional.</li>
+    </ol>
+  </section>
+
   <section class="shop-card" aria-label="Shop">
     <p><strong>{{ shop_name }}</strong></p>
     <p>{{ shop_address }}</p>
@@ -12,25 +21,39 @@
   </section>
 
   {% if open_positions %}
+    <h2>Open jobs</h2>
     {% for p in open_positions %}
-      <section class="role-card" data-position-id="{{ p.id }}">
-        <h2 class="role-name">{{ p.title }}</h2>
-        <p class="role-meta">{{ p.hours_per_week }} hours/week · {{ p.hourly_pay_display }}</p>
-        {% if p.description %}
-          <p>{{ p.description }}</p>
+      <article class="role-card" data-position-id="{{ p.id }}">
+        <a class="role-card-link" href="/jobs/{{ p.id }}">
+          <h3 class="role-name">{{ p.title }}</h3>
+          <p class="role-meta">{{ p.hours_per_week }} hours/week · {{ p.hourly_pay_display }}</p>
+          {% if p.description %}
+            <p>{{ p.description }}</p>
+          {% endif %}
+          <span class="role-open">See this job</span>
+        </a>
+        {% if not user or not user.is_admin %}
+          <p class="role-actions">
+            {% if user %}
+              <a class="btn" href="/apply?position_id={{ p.id }}">Apply for this role</a>
+            {% else %}
+              <a class="btn" href="/login?position_id={{ p.id }}">Log in to apply</a>
+              <a class="btn btn-ghost" href="/signup?position_id={{ p.id }}">Sign up with email</a>
+            {% endif %}
+          </p>
         {% endif %}
-      </section>
+      </article>
     {% endfor %}
   {% else %}
     <p class="hint">No open positions right now.</p>
   {% endif %}
 
-  <p class="hint">One form. Resume PDF is optional. Sign in with Google, then apply.</p>
   {% if user and user.is_admin %}
     <p><a class="btn" href="/admin">Review applications</a></p>
   {% elif user %}
     <p><a class="btn" href="/apply">Continue your application</a></p>
   {% else %}
+    <p class="hint">Sign in with Google to apply.</p>
     {% include "_google_signin.html" %}
     <p class="hint">Or <a href="/signup">sign up with email</a> · <a href="/login">log in with email</a>.</p>
   {% endif %}

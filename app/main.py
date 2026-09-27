@@ -7,13 +7,15 @@ HTMX swaps the admin row when an application is marked reviewed.
 from __future__ import annotations
 
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -65,6 +67,8 @@ SHOP_NAME = "Sunshine's Bakery"
 SHOP_ADDRESS = "2231 1st Ave S, Irondale AL 35210"
 SHOP_PHONE = "(205) 602-3485"
 MAX_RESUME_BYTES = 5 * 1024 * 1024
+AUTH_NEXT_KEY = "auth_next"
+_POSITION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 def session_secret() -> str:
@@ -148,6 +152,105 @@ def _redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=303)
 
 
+def _safe_next(raw: str | None) -> str | None:
+    """Allow only same-site apply, application, and job paths."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if len(raw) > 200 or not raw.startswith("/") or raw.startswith("//"):
+        return None
+    if any(token in raw for token in ("\\", "\n", "\r", "://")):
+        return None
+    path, _, query = raw.partition("?")
+    if path.startswith("/jobs/"):
+        job_id = path[len("/jobs/") :]
+        if query or not _POSITION_ID_RE.match(job_id):
+            return None
+        return path
+    if path == "/application":
+        return path if not query else None
+    if path != "/apply":
+        return None
+    if not query:
+        return "/apply"
+    if not query.startswith("position_id=") or "&" in query:
+        return None
+    pid = query.split("=", 1)[1]
+    if not _POSITION_ID_RE.match(pid):
+        return None
+    return f"/apply?position_id={pid}"
+
+
+def _open_position(store, position_id: str | None):
+    pid = (position_id or "").strip()
+    if not _POSITION_ID_RE.match(pid):
+        return None
+    row = store.get_position(pid)
+    if row is None or not row.open:
+        return None
+    return row
+
+
+def _stash_auth_next(request: Request, store, position_id: str | None, next_url: str | None) -> str | None:
+    """Remember a safe post-login destination. Cleared when nothing valid was passed."""
+    nxt = _safe_next(next_url)
+    if nxt and nxt.startswith("/apply?position_id="):
+        if _open_position(store, nxt.split("=", 1)[1]) is None:
+            nxt = "/apply"
+    elif nxt and nxt.startswith("/jobs/"):
+        if _open_position(store, nxt[len("/jobs/") :]) is None:
+            nxt = None
+    if nxt is None:
+        row = _open_position(store, position_id)
+        if row is not None:
+            nxt = f"/apply?position_id={row.id}"
+    if nxt:
+        request.session[AUTH_NEXT_KEY] = nxt
+    else:
+        request.session.pop(AUTH_NEXT_KEY, None)
+    return nxt
+
+
+def _remember_posted_next(request: Request, store, position_id: str, next_url: str) -> None:
+    if (position_id or "").strip() or (next_url or "").strip():
+        _stash_auth_next(request, store, position_id, next_url)
+
+
+def _auth_query(store, position_id: str | None, next_url: str | None) -> str:
+    row = _open_position(store, position_id)
+    if row is not None:
+        return "?" + urlencode({"position_id": str(row.id)})
+    safe = _safe_next(next_url)
+    if safe:
+        return "?" + urlencode({"next": safe})
+    return ""
+
+
+def _auth_return_path(page: str, position_id: str | None, next_url: str | None) -> str:
+    params: dict[str, str] = {}
+    pid = (position_id or "").strip()
+    if _POSITION_ID_RE.match(pid):
+        params["position_id"] = pid
+    else:
+        safe = _safe_next(next_url)
+        if safe:
+            params["next"] = safe
+    if not params:
+        return f"/{page}"
+    return f"/{page}?" + urlencode(params)
+
+
+def _after_login(request: Request, store, user):
+    nxt = request.session.pop(AUTH_NEXT_KEY, None)
+    if user.is_admin:
+        return _redirect("/admin")
+    if store.get_application_for_user(user.id) is not None:
+        return _redirect("/application")
+    if nxt:
+        return _redirect(nxt)
+    return _redirect("/apply")
+
+
 def _attach_applicant_email(store, row):
     """Set row.applicant_email from the signup User; empty string if missing."""
     user = store.get_user_by_id(row.user_id)
@@ -196,15 +299,43 @@ def home(request: Request, store=Depends(get_store)):
     return render(request, "index.html", user, open_positions=open_positions)
 
 
+@app.get("/jobs/{position_id}", response_class=HTMLResponse)
+def job_detail(position_id: str, request: Request, store=Depends(get_store)):
+    user = get_current_user(request, store)
+    position = _open_position(store, position_id)
+    if position is None:
+        _flash(request, "That job isn't open right now.")
+        return _redirect("/")
+    return render(request, "job.html", user, position=position)
+
+
 # --- Auth (applicant signup + login). No public admin register. ---------------
 
 
+def _render_auth(request: Request, store, user, template: str, position_id: str | None, next_url: str | None):
+    row = _open_position(store, position_id)
+    return render(
+        request,
+        template,
+        user,
+        auth_next=request.session.get(AUTH_NEXT_KEY) or "",
+        position_id=str(row.id) if row is not None else "",
+        auth_query=_auth_query(store, position_id, next_url),
+    )
+
+
 @app.get("/signup", response_class=HTMLResponse)
-def signup_form(request: Request, store=Depends(get_store)):
+def signup_form(
+    request: Request,
+    store=Depends(get_store),
+    position_id: str | None = None,
+    next_url: str | None = Query(None, alias="next"),
+):
+    _stash_auth_next(request, store, position_id, next_url)
     user = get_current_user(request, store)
     if user is not None:
-        return _redirect("/apply" if not user.is_admin else "/admin")
-    return render(request, "signup.html", user)
+        return _after_login(request, store, user)
+    return _render_auth(request, store, user, "signup.html", position_id, next_url)
 
 
 @app.post("/signup")
@@ -213,34 +344,43 @@ def signup(
     email: str = Form(...),
     password: str = Form(...),
     is_admin: str | None = Form(None),  # ignored — public cannot register as admin
+    position_id: str = Form(""),
+    next_url: str = Form("", alias="next"),
     store=Depends(get_store),
 ):
     _ = is_admin  # never honored
     email_n = normalize_email(email)
     if not email_n or "@" not in email_n:
         _flash(request, "Enter a valid email.")
-        return _redirect("/signup")
+        return _redirect(_auth_return_path("signup", position_id, next_url))
     if len(password) < 8:
         _flash(request, "Password must be at least 8 characters.")
-        return _redirect("/signup")
+        return _redirect(_auth_return_path("signup", position_id, next_url))
     existing = store.get_user_by_email(email_n)
     if existing is not None:
         if not password_is_usable(existing.password_hash):
             _flash(request, "That email uses Sign in with Google.")
         else:
             _flash(request, "That email already has an account. Log in instead.")
-        return _redirect("/login")
+        return _redirect(_auth_return_path("login", position_id, next_url))
     user = store.create_user(email_n, hash_password(password), is_admin=False)
     login_user(request, user)
-    return _redirect("/apply")
+    _remember_posted_next(request, store, position_id, next_url)
+    return _after_login(request, store, user)
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_form(request: Request, store=Depends(get_store)):
+def login_form(
+    request: Request,
+    store=Depends(get_store),
+    position_id: str | None = None,
+    next_url: str | None = Query(None, alias="next"),
+):
+    _stash_auth_next(request, store, position_id, next_url)
     user = get_current_user(request, store)
     if user is not None:
-        return _redirect("/admin" if user.is_admin else "/apply")
-    return render(request, "login.html", user)
+        return _after_login(request, store, user)
+    return _render_auth(request, store, user, "login.html", position_id, next_url)
 
 
 @app.post("/login")
@@ -248,6 +388,8 @@ def login(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    position_id: str = Form(""),
+    next_url: str = Form("", alias="next"),
     store=Depends(get_store),
 ):
     email_n = normalize_email(email)
@@ -257,9 +399,10 @@ def login(
             _flash(request, "That email uses Sign in with Google.")
         else:
             _flash(request, "Email or password did not match.")
-        return _redirect("/login")
+        return _redirect(_auth_return_path("login", position_id, next_url))
     login_user(request, user)
-    return _after_login(store, user)
+    _remember_posted_next(request, store, position_id, next_url)
+    return _after_login(request, store, user)
 
 
 @app.get("/auth/google/start")
@@ -314,15 +457,7 @@ def google_callback(
         _flash(request, problem or "Google sign-in did not complete. Try again.")
         return _redirect("/login")
     login_user(request, user)
-    return _after_login(store, user)
-
-
-def _after_login(store, user):
-    if user.is_admin:
-        return _redirect("/admin")
-    if store.get_application_for_user(user.id) is not None:
-        return _redirect("/application")
-    return _redirect("/apply")
+    return _after_login(request, store, user)
 
 
 def _applicant_from_google(store, email: str, google_sub: str):
@@ -363,6 +498,7 @@ def apply_form(
     request: Request,
     user=Depends(require_login),
     store=Depends(get_store),
+    position_id: str | None = None,
 ):
     if user.is_admin:
         return _redirect("/admin")
@@ -370,7 +506,14 @@ def apply_form(
     if existing is not None:
         return _redirect("/application")
     open_positions = store.list_open_positions()
-    return render(request, "apply.html", user, open_positions=open_positions)
+    selected_position = _open_position(store, position_id)
+    return render(
+        request,
+        "apply.html",
+        user,
+        open_positions=open_positions,
+        selected_position=selected_position,
+    )
 
 
 def _yes_no(value: str | None) -> str:

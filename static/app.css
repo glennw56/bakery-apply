@@ -127,15 +127,73 @@ body.home h1::after {
 }
 .shop-card p, .role-card p { margin: 0.25rem 0; }
 .role-card {
+  position: relative;
+  cursor: pointer;
   border-top: 1px solid var(--gold);
   padding-top: 1.05rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
+.role-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px rgba(231, 94, 148, 0.14);
+}
+a.role-card-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+a.role-card-link:hover { color: inherit; }
+a.role-card-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+a.role-card-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+.role-card:hover .role-name { text-decoration: underline; }
 .role-name {
   font-size: 1.32rem;
   font-weight: 700;
   color: var(--accent);
   margin: 0 0 0.2rem;
 }
+.role-open {
+  display: inline-block;
+  margin-top: 0.45rem;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.role-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.75rem;
+  align-items: center;
+  margin: 0.9rem 0 0;
+}
+.how-to-apply {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.95rem 1.15rem 1.05rem;
+  margin: 1.1rem 0 0.2rem;
+}
+.how-to-apply h2 {
+  font-size: 1.2rem;
+  margin: 0 0 0.35rem;
+}
+.how-to-apply ol {
+  margin: 0;
+  padding-left: 1.3rem;
+}
+.how-to-apply li + li { margin-top: 0.15rem; }
+.job-description { max-width: 42rem; }
 
 .note-form {
   display: grid;
@@ -185,6 +243,9 @@ a.btn-ghost:hover {
   background: var(--accent);
   color: var(--accent-ink);
 }
+.role-actions a.btn,
+.role-actions a.btn-ghost { margin-left: 0; }
+.role-card p.role-actions { margin: 0.9rem 0 0; }
 a.btn-google {
   display: inline-flex;
   align-items: center;

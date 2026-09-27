@@ -41,8 +41,8 @@
           <button type="submit">Log out</button>
         </form>
       {% else %}
-        <a href="/login">Log in</a>
-        <a href="/signup">Sign up</a>
+        <a href="/login{{ auth_query|default('') }}">Log in to apply</a>
+        <a href="/signup{{ auth_query|default('') }}">Sign up to apply</a>
       {% endif %}
     </nav>
   </header>

@@ -891,3 +891,149 @@ def test_google_callback_does_not_sign_in_admin(monkeypatch) -> None:
         assert store.get_user_by_google_sub("admin-sub") is None
     finally:
         store.close()
+
+
+def test_jobs_are_clickable_and_login_frames_applying() -> None:
+    client = _client()
+    pos_id = _open_position_id()
+    home = client.get("/")
+    assert home.status_code == 200
+    assert "How to apply" in home.text
+    assert "Pick a job." in home.text
+    assert "Log in to apply" in home.text
+    assert "Sign up to apply" in home.text
+    assert "Resume PDF is optional" in home.text
+    assert "Sign in with Google to apply." in home.text
+    assert f'href="/jobs/{pos_id}"' in home.text
+    assert f'href="/login?position_id={pos_id}"' in home.text
+    assert f'href="/signup?position_id={pos_id}"' in home.text
+    assert 'class="role-card"' in home.text
+
+    job = client.get(f"/jobs/{pos_id}")
+    assert job.status_code == 200
+    assert "<h1>Counter / Cashier</h1>" in job.text
+    assert "$13/hour" in job.text
+    assert "40 hours/week" in job.text
+    assert "2231 1st Ave S" in job.text
+    assert "Log in to apply" in job.text
+    assert "Sign up with email" in job.text
+    assert f'href="/login?position_id={pos_id}"' in job.text
+    assert f'href="/signup?position_id={pos_id}"' in job.text
+
+    missing = client.get("/jobs/999999", follow_redirects=False)
+    assert missing.status_code == 303
+    assert missing.headers["location"].endswith("/")
+    flashed = client.get("/jobs/not-a-job")
+    assert flashed.status_code == 200
+    assert "open right now" in flashed.text
+    assert "Counter / Cashier" in flashed.text
+
+    login = client.get(f"/login?position_id={pos_id}")
+    assert "<h1>Log in to apply</h1>" in login.text
+    assert "You need an account to submit an application." in login.text
+    assert ">Log in to apply</button>" in login.text
+    assert login.text.index("btn-google") < login.text.index("auth-divider")
+    assert f'name="position_id" value="{pos_id}"' in login.text
+    assert f'href="/signup?position_id={pos_id}"' in login.text
+
+    signup = client.get("/signup")
+    assert "<h1>Sign up to apply</h1>" in signup.text
+    assert "Create an account to submit an application." in signup.text
+    assert ">Sign up to apply</button>" in signup.text
+    assert signup.text.index("btn-google") < signup.text.index("auth-divider")
+
+    created = client.post(
+        "/signup",
+        data={"email": "jobcta@example.com", "password": "secret123", "position_id": pos_id},
+        follow_redirects=False,
+    )
+    assert created.status_code in (302, 303)
+    assert created.headers["location"].endswith(f"/apply?position_id={pos_id}")
+    apply_page = client.get(f"/apply?position_id={pos_id}")
+    assert apply_page.status_code == 200
+    assert f'value="{pos_id}" selected' in apply_page.text
+    assert "applying for Counter / Cashier" in apply_page.text
+    logged_home = client.get("/")
+    assert "Apply for this role" in logged_home.text
+    assert f'href="/apply?position_id={pos_id}"' in logged_home.text
+    job_in = client.get(f"/jobs/{pos_id}")
+    assert "Apply for this role" in job_in.text
+    assert f'href="/apply?position_id={pos_id}"' in job_in.text
+
+    client.post("/logout")
+    logged = client.post(
+        "/login",
+        data={"email": "jobcta@example.com", "password": "secret123", "position_id": pos_id},
+        follow_redirects=False,
+    )
+    assert logged.headers["location"].endswith(f"/apply?position_id={pos_id}")
+
+    outsider = client.post(
+        "/login",
+        data={
+            "email": "jobcta@example.com",
+            "password": "secret123",
+            "next": "https://evil.example/phish",
+        },
+        follow_redirects=False,
+    )
+    assert outsider.headers["location"].endswith("/apply")
+
+    admin = _client()
+    admin.post(
+        "/login",
+        data={"email": "admin@test.local", "password": "admin-test-password"},
+        follow_redirects=False,
+    )
+    admin.post(
+        "/admin/positions",
+        data={
+            "title": "Bread Runner",
+            "hours_per_week": "20",
+            "hourly_pay": "14",
+            "description": "Restock the bread shelf.",
+            "open": "true",
+        },
+        follow_redirects=False,
+    )
+    store = open_store()
+    try:
+        row = next(p for p in store.list_positions() if p.title == "Bread Runner" and p.open)
+        closed_id = row.id
+    finally:
+        store.close()
+    visible = client.get(f"/jobs/{closed_id}")
+    assert visible.status_code == 200
+    assert "Bread Runner" in visible.text
+    admin.post(f"/admin/positions/{closed_id}", data={"action": "close"}, follow_redirects=False)
+    closed = client.get(f"/jobs/{closed_id}", follow_redirects=False)
+    assert closed.status_code == 303
+    assert closed.headers["location"].endswith("/")
+    home_after = client.get("/")
+    assert "Bread Runner" not in home_after.text
+
+
+def test_google_sign_in_keeps_selected_job(monkeypatch) -> None:
+    from urllib.parse import parse_qs, urlparse
+
+    _google_env(monkeypatch)
+    _patch_google(
+        monkeypatch,
+        {
+            "sub": "google-sub-job",
+            "email": "job.google@gmail.com",
+            "email_verified": True,
+        },
+    )
+    client = _client()
+    pos_id = _open_position_id()
+    login_page = client.get(f"/login?position_id={pos_id}")
+    assert login_page.status_code == 200
+    started = _google_start(client)
+    state = parse_qs(urlparse(started.headers["location"]).query)["state"][0]
+    callback = client.get(
+        f"/auth/google/callback?code=good-code&state={state}",
+        follow_redirects=False,
+    )
+    assert callback.status_code in (302, 303)
+    assert callback.headers["location"].endswith(f"/apply?position_id={pos_id}")

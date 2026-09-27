@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ position.title }} · Sunshine's Bakery{% endblock %}
+{% block content %}
+  <p class="hint"><a href="/">All open jobs</a></p>
+  <h1>{{ position.title }}</h1>
+  <p class="role-meta">{{ position.hours_per_week }} hours/week · {{ position.hourly_pay_display }}</p>
+  {% if position.description %}
+    <p class="job-description">{{ position.description }}</p>
+  {% endif %}
+
+  <section class="shop-card" aria-label="Shop">
+    <p><strong>{{ shop_name }}</strong></p>
+    <p>{{ shop_address }}</p>
+    <p>Phone {{ shop_phone }}</p>
+    <p>A small neighborhood shop in downtown Irondale.</p>
+  </section>
+
+  {% if user and user.is_admin %}
+    <p class="role-actions">
+      <a class="btn" href="/admin">Review applications</a>
+    </p>
+  {% elif user %}
+    <p class="role-actions">
+      <a class="btn" href="/apply?position_id={{ position.id }}">Apply for this role</a>
+    </p>
+  {% else %}
+    <p class="role-actions">
+      <a class="btn" href="/login?position_id={{ position.id }}">Log in to apply</a>
+      <a class="btn btn-ghost" href="/signup?position_id={{ position.id }}">Sign up with email</a>
+    </p>
+    <p class="hint">Sign in to submit an application. Resume PDF is optional.</p>
+  {% endif %}
+{% endblock %}

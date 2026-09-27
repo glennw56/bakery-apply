@@ -3,6 +3,9 @@
 {% block content %}
   <h1>Apply</h1>
   <p class="lede">{{ shop_address }} · {{ shop_phone }}</p>
+  {% if selected_position %}
+    <p class="hint">You're applying for {{ selected_position.title }}. You can switch jobs in the list below.</p>
+  {% endif %}
   {% if not open_positions %}
     <p class="hint">No open positions right now.</p>
   {% else %}
@@ -19,7 +22,7 @@
     <label>Position
       <select name="position_id" required>
         {% for p in open_positions %}
-          <option value="{{ p.id }}" {% if loop.first %}selected{% endif %}>{{ p.title }}</option>
+          <option value="{{ p.id }}"{% if selected_position and p.id == selected_position.id %} selected{% elif not selected_position and loop.first %} selected{% endif %}>{{ p.title }}</option>
         {% endfor %}
       </select>
     </label>

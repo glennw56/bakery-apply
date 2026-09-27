@@ -199,6 +199,13 @@ a.btn-google:hover {
   border-color: var(--accent);
 }
 .auth-google { margin: 0 0 0.9rem; }
+/* Login and signup place Google above the email divider. Stretch that
+   button to the same width as the form card. The hiring-page pill stays compact. */
+.auth-google:has(+ .auth-divider) a.btn-google {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}
 .auth-divider {
   display: flex;
   align-items: center;

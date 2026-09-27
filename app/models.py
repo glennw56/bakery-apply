@@ -51,7 +51,15 @@ APPLICATION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("position_id", "INTEGER"),
 )
 
+PROVIDER_PASSWORD = "password"
+PROVIDER_GOOGLE = "google"
+
 # create_all makes the table on a fresh DB. init_db ALTERs missing columns on existing files.
+USER_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("google_sub", "VARCHAR(255)"),
+    ("provider", "VARCHAR(32) DEFAULT 'password' NOT NULL"),
+)
+
 POSITION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("title", "VARCHAR(128) DEFAULT '' NOT NULL"),
     ("hours_per_week", "INTEGER DEFAULT 0 NOT NULL"),
@@ -78,6 +86,15 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # google_sub is NULL for password-only accounts. Unique so one Google account
+    # maps to one user. provider is "password" or "google".
+    google_sub: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    provider: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=PROVIDER_PASSWORD,
+        server_default=PROVIDER_PASSWORD,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

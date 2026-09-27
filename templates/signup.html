@@ -2,7 +2,9 @@
 {% block title %}Sign up · Sunshine's Bakery{% endblock %}
 {% block content %}
   <h1>Create an account</h1>
-  <p class="lede">Email and password. Then fill in the application form.</p>
+  <p class="lede">Sign in with Google to apply with a verified email. Email and password still work.</p>
+  {% include "_google_signin.html" %}
+  <p class="auth-divider">or use email</p>
   <form class="note-form" method="post" action="/signup">
     <label>Email
       <input type="email" name="email" required autocomplete="email">

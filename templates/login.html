@@ -2,6 +2,9 @@
 {% block title %}Log in · Sunshine's Bakery{% endblock %}
 {% block content %}
   <h1>Log in</h1>
+  <p class="lede">Sign in with Google to apply with a verified email.</p>
+  {% include "_google_signin.html" %}
+  <p class="auth-divider">or use email</p>
   <form class="note-form" method="post" action="/login">
     <label>Email
       <input type="email" name="email" required autocomplete="email">

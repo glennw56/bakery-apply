@@ -1,4 +1,4 @@
-"""Cover signup, login, apply, optional resume PDF, admin list, auth walls, open positions."""
+"""Cover signup, login, Google OAuth, apply, optional resume PDF, admin list, auth walls, open positions."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.auth import seed_admin  # noqa: E402
 from app.db import init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.store import open_store, seed_positions  # noqa: E402
+from app.store import ROOT, open_store, seed_positions  # noqa: E402
 
 init_db()
 seed_admin()
@@ -446,7 +446,7 @@ def test_apply_with_valid_resume_pdf_admin_can_download() -> None:
     ids = re.findall(r"/admin/applications/(\d+)/resume", page.text)
     assert ids
     app_id = ids[0]
-    stored = Path("/workspace/bakery-apply/data/resumes") / f"{app_id}.pdf"
+    stored = ROOT / "data" / "resumes" / f"{app_id}.pdf"
     assert stored.is_file()
     assert stored.read_bytes().startswith(b"%PDF")
     downloaded = admin.get(f"/admin/applications/{app_id}/resume")
@@ -594,3 +594,300 @@ def test_cloud_backend_requires_both_env_vars(monkeypatch) -> None:
 
     assert "google.cloud.firestore" not in sys.modules
     assert "google.cloud.storage" not in sys.modules
+
+
+LIVE_GOOGLE_REDIRECT = "https://bakery-apply-k6uuoen7wa-ue.a.run.app/auth/google/callback"
+
+
+def _google_env(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-client-secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", LIVE_GOOGLE_REDIRECT)
+
+
+def _patch_google(monkeypatch, info: dict) -> None:
+    def fake_exchange(code: str) -> dict:
+        assert code == "good-code"
+        return {"access_token": "tok-test"}
+
+    def fake_userinfo(token: str) -> dict:
+        assert token == "tok-test"
+        return info
+
+    monkeypatch.setattr("app.main.exchange_code", fake_exchange)
+    monkeypatch.setattr("app.main.fetch_userinfo", fake_userinfo)
+
+
+def _google_start(client: TestClient):
+    response = client.get("/auth/google/start", follow_redirects=False)
+    assert response.status_code == 302
+    return response
+
+
+def _google_state(client: TestClient) -> str:
+    from urllib.parse import parse_qs, urlparse
+
+    started = _google_start(client)
+    query = parse_qs(urlparse(started.headers["location"]).query)
+    return query["state"][0]
+
+
+def test_google_redirect_uri_default_and_public_base(monkeypatch) -> None:
+    from app.google_oauth import DEFAULT_REDIRECT_URI, google_redirect_uri
+
+    monkeypatch.delenv("GOOGLE_REDIRECT_URI", raising=False)
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    assert google_redirect_uri() == DEFAULT_REDIRECT_URI
+    assert DEFAULT_REDIRECT_URI == LIVE_GOOGLE_REDIRECT
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://example.test/")
+    assert google_redirect_uri() == "https://example.test/auth/google/callback"
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", LIVE_GOOGLE_REDIRECT)
+    assert google_redirect_uri() == LIVE_GOOGLE_REDIRECT
+
+
+def test_email_is_verified_requires_true() -> None:
+    from app.google_oauth import email_is_verified
+
+    assert email_is_verified({"email_verified": True})
+    assert email_is_verified({"email_verified": "true"})
+    assert email_is_verified({"email_verified": "TRUE"})
+    assert not email_is_verified({"email_verified": False})
+    assert not email_is_verified({"email_verified": "false"})
+    assert not email_is_verified({})
+    assert not email_is_verified({"email_verified": 1})
+
+
+def test_google_cta_on_home_login_and_signup() -> None:
+    client = _client()
+    for path in ("/", "/login", "/signup"):
+        page = client.get(path)
+        assert page.status_code == 200
+        assert "Sign in with Google" in page.text
+        assert 'href="/auth/google/start"' in page.text
+    assert 'action="/login"' in client.get("/login").text
+    assert 'action="/signup"' in client.get("/signup").text
+
+
+def test_google_start_without_config(monkeypatch) -> None:
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+    client = _client()
+    response = client.get("/auth/google/start", follow_redirects=False)
+    assert response.status_code in (302, 303)
+    assert response.headers["location"].endswith("/login")
+    page = client.get("/login")
+    assert "not configured" in page.text
+
+
+def test_google_oauth_start_and_callback(monkeypatch) -> None:
+    from urllib.parse import parse_qs, urlparse
+
+    _google_env(monkeypatch)
+    _patch_google(
+        monkeypatch,
+        {
+            "sub": "google-sub-1",
+            "email": "Applicant@Gmail.com",
+            "email_verified": True,
+        },
+    )
+    client = _client()
+    started = _google_start(client)
+    location = started.headers["location"]
+    parsed = urlparse(location)
+    assert parsed.scheme == "https"
+    assert parsed.netloc == "accounts.google.com"
+    assert parsed.path == "/o/oauth2/v2/auth"
+    query = parse_qs(parsed.query)
+    assert query["client_id"] == ["test-client-id"]
+    assert query["redirect_uri"] == [LIVE_GOOGLE_REDIRECT]
+    assert query["response_type"] == ["code"]
+    assert "openid" in query["scope"][0]
+    assert "email" in query["scope"][0]
+    assert query["state"][0]
+    assert "client_secret" not in location
+    state = query["state"][0]
+
+    callback = client.get(
+        f"/auth/google/callback?code=good-code&state={state}",
+        follow_redirects=False,
+    )
+    assert callback.status_code in (302, 303)
+    assert callback.headers["location"].endswith("/apply")
+    apply_page = client.get("/apply")
+    assert apply_page.status_code == 200
+    assert "Log out" in apply_page.text
+
+    store = open_store()
+    try:
+        user = store.get_user_by_email("applicant@gmail.com")
+        assert user is not None
+        assert user.google_sub == "google-sub-1"
+        assert user.provider == "google"
+        assert user.is_admin is False
+        assert not user.password_hash.startswith("$2")
+        user_id = user.id
+    finally:
+        store.close()
+
+    submitted = client.post(
+        "/apply",
+        data=_apply_data(name="Google Applicant"),
+        follow_redirects=False,
+    )
+    assert submitted.status_code in (302, 303)
+    assert submitted.headers["location"].endswith("/application")
+    client.post("/logout")
+    again = client.get(
+        f"/auth/google/callback?code=good-code&state={_google_state(client)}",
+        follow_redirects=False,
+    )
+    assert again.status_code in (302, 303)
+    assert again.headers["location"].endswith("/application")
+    store = open_store()
+    try:
+        again_user = store.get_user_by_google_sub("google-sub-1")
+        assert again_user is not None
+        assert again_user.id == user_id
+    finally:
+        store.close()
+
+    client.post("/logout")
+    password = client.post(
+        "/login",
+        data={"email": "applicant@gmail.com", "password": "secret123"},
+        follow_redirects=False,
+    )
+    assert password.headers["location"].endswith("/login")
+    login_page = client.get("/login")
+    assert "uses Sign in with Google" in login_page.text
+    assert "Log out" not in login_page.text
+
+
+def test_google_callback_rejects_unverified_email(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    _patch_google(
+        monkeypatch,
+        {
+            "sub": "sub-unverified",
+            "email": "unverified@gmail.com",
+            "email_verified": False,
+        },
+    )
+    client = _client()
+    state = _google_state(client)
+    response = client.get(
+        f"/auth/google/callback?code=good-code&state={state}",
+        follow_redirects=False,
+    )
+    assert response.status_code in (302, 303)
+    assert response.headers["location"].endswith("/login")
+    page = client.get("/login")
+    assert "did not verify" in page.text
+    assert "Log out" not in page.text
+    store = open_store()
+    try:
+        assert store.get_user_by_email("unverified@gmail.com") is None
+        assert store.get_user_by_google_sub("sub-unverified") is None
+    finally:
+        store.close()
+
+
+def test_google_callback_rejects_bad_state(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    called = {"n": 0}
+
+    def fake_exchange(code: str) -> dict:
+        called["n"] += 1
+        return {"access_token": "tok-test"}
+
+    monkeypatch.setattr("app.main.exchange_code", fake_exchange)
+    client = _client()
+    _google_state(client)
+    response = client.get(
+        "/auth/google/callback?code=good-code&state=not-the-state",
+        follow_redirects=False,
+    )
+    assert response.status_code in (302, 303)
+    assert response.headers["location"].endswith("/login")
+    assert called["n"] == 0
+    page = client.get("/login")
+    assert "could not be confirmed" in page.text
+    assert "Log out" not in page.text
+
+
+def test_google_links_existing_password_applicant(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    _patch_google(
+        monkeypatch,
+        {
+            "sub": "linked-sub",
+            "email": "linked@example.com",
+            "email_verified": True,
+        },
+    )
+    client = _client()
+    _signup(client, "linked@example.com")
+    store = open_store()
+    try:
+        before = store.get_user_by_email("linked@example.com")
+        assert before is not None
+        before_id = before.id
+        assert before.provider == "password"
+        assert before.google_sub is None
+    finally:
+        store.close()
+    client.post("/logout")
+    response = client.get(
+        f"/auth/google/callback?code=good-code&state={_google_state(client)}",
+        follow_redirects=False,
+    )
+    assert response.headers["location"].endswith("/apply")
+    store = open_store()
+    try:
+        after = store.get_user_by_email("linked@example.com")
+        assert after is not None
+        assert after.id == before_id
+        assert after.google_sub == "linked-sub"
+        assert after.provider == "google"
+        assert after.password_hash.startswith("$2")
+    finally:
+        store.close()
+    client.post("/logout")
+    logged = client.post(
+        "/login",
+        data={"email": "linked@example.com", "password": "secret123"},
+        follow_redirects=False,
+    )
+    assert logged.headers["location"].endswith("/apply")
+
+
+def test_google_callback_does_not_sign_in_admin(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    _patch_google(
+        monkeypatch,
+        {
+            "sub": "admin-sub",
+            "email": "admin@test.local",
+            "email_verified": True,
+        },
+    )
+    client = _client()
+    response = client.get(
+        f"/auth/google/callback?code=good-code&state={_google_state(client)}",
+        follow_redirects=False,
+    )
+    assert response.headers["location"].endswith("/login")
+    page = client.get("/login")
+    assert "Admin accounts sign in with email and password." in page.text
+    admin_try = client.get("/admin", follow_redirects=False)
+    assert admin_try.status_code in (302, 303)
+    assert "/login" in admin_try.headers["location"]
+    store = open_store()
+    try:
+        admin = store.get_user_by_email("admin@test.local")
+        assert admin is not None and admin.is_admin
+        assert not admin.google_sub
+        assert store.get_user_by_google_sub("admin-sub") is None
+    finally:
+        store.close()

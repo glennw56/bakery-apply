@@ -185,6 +185,35 @@ a.btn-ghost:hover {
   background: var(--accent);
   color: var(--accent-ink);
 }
+a.btn-google {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+a.btn-google:hover {
+  background: #fff;
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.auth-google { margin: 0 0 0.9rem; }
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 0.8rem;
+}
+.auth-divider::before, .auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.google-g { flex: 0 0 auto; }
 
 table.sales {
   width: 100%;

@@ -25,12 +25,13 @@
     <p class="hint">No open positions right now.</p>
   {% endif %}
 
-  <p class="hint">One form. Resume PDF is optional. Create an account, then apply.</p>
+  <p class="hint">One form. Resume PDF is optional. Sign in with Google, then apply.</p>
   {% if user and user.is_admin %}
     <p><a class="btn" href="/admin">Review applications</a></p>
   {% elif user %}
     <p><a class="btn" href="/apply">Continue your application</a></p>
   {% else %}
-    <p><a class="btn" href="/signup">Sign up to apply</a> <a class="btn btn-ghost" href="/login">Log in</a></p>
+    {% include "_google_signin.html" %}
+    <p class="hint">Or <a href="/signup">sign up with email</a> · <a href="/login">log in with email</a>.</p>
   {% endif %}
 {% endblock %}

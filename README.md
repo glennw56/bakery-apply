@@ -2,13 +2,13 @@
 
 ## What this is
 
-Public job-apply site for **Sunshine's Bakery** (Irondale, AL). Openings live in a `positions` table (SQLite) / `positions` collection (Firestore) — not hardcoded. Startup seeds **one** Counter / Cashier if none exist. Applicant signup/login, one application per account, optional resume PDF, seeded admin list. FastAPI + Jinja + HTMX.
+Public job-apply site for **Sunshine's Bakery** (Irondale, AL). Openings live in a `positions` table (SQLite) / `positions` collection (Firestore) — not hardcoded. Startup seeds **one** Counter / Cashier if none exist. Applicants sign in with Google (verified email) or email + password, one application per account, optional resume PDF, seeded admin list. FastAPI + Jinja + HTMX. Admin stays on email + password.
 
 **Shop:** 2231 1st Ave S, Irondale AL 35210 · (205) 602-3485
 
 **Persistence:** locally, one SQLite file (`data/app.db`, WAL) and resume PDFs under `data/resumes/`. On Cloud Run, when `GCS_BUCKET` and `GOOGLE_CLOUD_PROJECT` (or `GCP_PROJECT`) are set, users + positions + applications go to Firestore native and resume PDFs go to a private GCS bucket. Skip Cloud SQL.
 
-**Not in git:** `.env`, the live sqlite file, resume PDFs, Square tokens / API keys (this app does not use Square). `data/*` is gitignored except `data/.gitkeep`. Copy `.env.example` to `.env` and set `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
+**Not in git:** `.env`, the live sqlite file, resume PDFs, Square tokens / API keys (this app does not use Square), Google OAuth client secret. `data/*` is gitignored except `data/.gitkeep`. Copy `.env.example` to `.env` and set `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Google client id/secret and redirect URI: see `DEPLOY.md`.
 
 v1 does **not** email candidates. There is no public self-serve job posting — only the seeded admin can add, edit, close, or reopen positions on `/admin`. Open positions show hours/week and hourly pay (seeded Counter / Cashier is 40 hours/week and $13/hour). There is no second location, no public `/register-admin`, and no invented extra openings on startup (exactly one seed). An optional resume PDF can be uploaded on the apply form (`%PDF` magic, 5 MB max). `/docs`, `/redoc`, and `/openapi.json` are disabled (404).
 
@@ -34,8 +34,10 @@ htmx 2.x is vendored at `static/htmx.min.js` (offline).
 | Route | What |
 | --- | --- |
 | `GET /` | Public hiring page — Irondale shop, **open** positions (title, hours/week, hourly pay, description). Closed positions are hidden |
-| `GET`/`POST /signup` | Applicant account (email + password). `is_admin` is ignored if sent |
-| `GET`/`POST /login` | Session cookie login |
+| `GET`/`POST /signup` | Applicant account (email + password). `is_admin` is ignored if sent. Primary button is Sign in with Google |
+| `GET`/`POST /login` | Session cookie login (email + password). Primary button is Sign in with Google |
+| `GET /auth/google/start` | Start Google OAuth (authorization code + `state` in the session) |
+| `GET /auth/google/callback` | Google redirect. Verified email creates or links the applicant and continues to apply |
 | `POST /logout` | Clear session |
 | `GET`/`POST /apply` | Logged-in applicant form: pick an open position, name, phone, availability, Talent screening, optional resume PDF. Stores `position_id` plus a title snapshot on `role` |
 | `GET /application` | Own application + status (`submitted` / `reviewed`). Shows “Resume attached (PDF)” if a file was uploaded; does not serve the file |
@@ -90,7 +92,7 @@ docker compose up --build
 ./scripts/test.sh
 ```
 
-Or `make test`, or `PYTHONPATH=. .venv/bin/pytest -q`. Uses a throwaway sqlite file (`BAKERY_APPLY_DB` tempfile); does not touch `data/app.db`. GCP clients are lazy-imported, so local tests do not need credentials. Covers signup, login, submit application (with and without optional PDF) picking Counter / Cashier, rejected non-PDF, admin list + resume download, unauthenticated `/admin` and resume GET, no public admin register, home shows `$13/hour` and `40 hours/week` for the seeded Counter / Cashier, admin can POST a new open position onto home, closing hides it, unauthenticated cannot POST positions, `/docs` and `/openapi.json` 404, session `https_only` false without `K_SERVICE`.
+Or `make test`, or `PYTHONPATH=. .venv/bin/pytest -q`. Uses a throwaway sqlite file (`BAKERY_APPLY_DB` tempfile); does not touch `data/app.db`. GCP clients are lazy-imported, so local tests do not need credentials. Covers signup, login, submit application (with and without optional PDF) picking Counter / Cashier, rejected non-PDF, admin list + resume download, unauthenticated `/admin` and resume GET, no public admin register, home shows `$13/hour` and `40 hours/week` for the seeded Counter / Cashier, admin can POST a new open position onto home, closing hides it, unauthenticated cannot POST positions, `/docs` and `/openapi.json` 404, session `https_only` false without `K_SERVICE`, Google OAuth start, callback with a verified email, and rejection when `email_verified` is false. Google token and userinfo calls are stubbed.
 
 ## Env
 
@@ -110,6 +112,10 @@ Or `make test`, or `PYTHONPATH=. .venv/bin/pytest -q`. Uses a throwaway sqlite f
 | `FIRESTORE_COLLECTION` | Applications collection name. Default `applications`. Users stay in collection `users` |
 | `K_SERVICE` | Set by Cloud Run. When present, session cookie is `https_only=True` |
 | `SESSION_HTTPS` | Set to `1` to force `https_only=True` without `K_SERVICE`. Local default is false |
+| `GOOGLE_CLIENT_ID` | OAuth web client id. Secret Manager on Cloud Run. See `DEPLOY.md` |
+| `GOOGLE_CLIENT_SECRET` | OAuth web client secret. Secret Manager. Never commit |
+| `GOOGLE_REDIRECT_URI` | Callback URL. Default `https://bakery-apply-k6uuoen7wa-ue.a.run.app/auth/google/callback` |
+| `PUBLIC_BASE_URL` | Optional. If `GOOGLE_REDIRECT_URI` is unset, callback is `{PUBLIC_BASE_URL}/auth/google/callback` |
 
 Cloud backend is used **only** when both `GCS_BUCKET` and `GOOGLE_CLOUD_PROJECT` (or `GCP_PROJECT`) are set. GCP client libraries are imported inside `CloudStore`, so a local pytest run never talks to GCP.
 
@@ -143,13 +149,17 @@ IMAGE=gcr.io/${PROJECT_ID}/bakery-apply
 printf '%s' 'replace-with-long-random' | gcloud secrets create SESSION_SECRET --data-file=-
 printf '%s' 'admin@example.com' | gcloud secrets create ADMIN_EMAIL --data-file=-
 printf '%s' 'replace-with-strong-password' | gcloud secrets create ADMIN_PASSWORD --data-file=-
+# Google applicant sign-in. Values never go in git. See DEPLOY.md.
+printf '%s' 'YOUR_CLIENT_ID' | gcloud secrets create GOOGLE_CLIENT_ID --data-file=-
+printf '%s' 'YOUR_CLIENT_SECRET' | gcloud secrets create GOOGLE_CLIENT_SECRET --data-file=-
+printf '%s' 'https://bakery-apply-k6uuoen7wa-ue.a.run.app/auth/google/callback' | gcloud secrets create GOOGLE_REDIRECT_URI --data-file=-
 
 # Build + push
 gcloud builds submit --tag "$IMAGE"
 
 # Runtime service account needs Secret Accessor
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
-for S in SESSION_SECRET ADMIN_EMAIL ADMIN_PASSWORD; do
+for S in SESSION_SECRET ADMIN_EMAIL ADMIN_PASSWORD GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URI; do
   gcloud secrets add-iam-policy-binding "$S"     --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"     --role="roles/secretmanager.secretAccessor"
 done
 
@@ -164,7 +174,7 @@ gcloud run deploy bakery-apply \
   --max-instances 1 \
   --memory 512Mi \
   --set-env-vars "GOOGLE_CLOUD_PROJECT=bakery-444323,FIRESTORE_DATABASE=(default),GCS_BUCKET=bakery-444323-apply-resumes,FIRESTORE_COLLECTION=applications,HOST=0.0.0.0" \
-  --set-secrets "SESSION_SECRET=SESSION_SECRET:latest,ADMIN_EMAIL=ADMIN_EMAIL:latest,ADMIN_PASSWORD=ADMIN_PASSWORD:latest"
+  --set-secrets "SESSION_SECRET=SESSION_SECRET:latest,ADMIN_EMAIL=ADMIN_EMAIL:latest,ADMIN_PASSWORD=ADMIN_PASSWORD:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,GOOGLE_REDIRECT_URI=GOOGLE_REDIRECT_URI:latest"
 ```
 
 Image is `python:3.12-slim`, non-root `appuser`, listens on `0.0.0.0:$PORT`. Dockerfile `CMD` is `scripts/docker-entrypoint.sh`.

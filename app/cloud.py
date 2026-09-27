@@ -23,6 +23,8 @@ from app.backend import (
 )
 from app.models import (
     HEAR_ABOUT_LABELS,
+    PROVIDER_GOOGLE,
+    PROVIDER_PASSWORD,
     ROLE_COUNTER,
     STATUS_REVIEWED,
     STATUS_SUBMITTED,
@@ -51,12 +53,16 @@ class CloudUser:
         password_hash: str,
         is_admin: bool,
         created_at: datetime | None = None,
+        google_sub: str | None = None,
+        provider: str = PROVIDER_PASSWORD,
     ) -> None:
         self.id = id
         self.email = email
         self.password_hash = password_hash
         self.is_admin = bool(is_admin)
         self.created_at = created_at
+        self.google_sub = google_sub or None
+        self.provider = provider or PROVIDER_PASSWORD
 
 
 class CloudPosition:
@@ -144,6 +150,8 @@ class CloudStore:
             password_hash=data.get("password_hash") or "",
             is_admin=bool(data.get("is_admin")),
             created_at=_naive_utc(data.get("created_at")),
+            google_sub=(data.get("google_sub") or None),
+            provider=data.get("provider") or PROVIDER_PASSWORD,
         )
 
     def _app_from_doc(self, doc) -> CloudApplication:
@@ -171,12 +179,36 @@ class CloudStore:
             return self._user_from_doc(doc)
         return None
 
-    def create_user(self, email: str, password_hash: str, is_admin: bool = False) -> CloudUser:
+    def get_user_by_google_sub(self, google_sub: str) -> CloudUser | None:
+        sub = (google_sub or "").strip()
+        if not sub:
+            return None
+        docs = (
+            self._fs.collection(USERS_COLLECTION)
+            .where(filter=self._field_filter("google_sub", "==", sub))
+            .limit(1)
+            .stream()
+        )
+        for doc in docs:
+            return self._user_from_doc(doc)
+        return None
+
+    def create_user(
+        self,
+        email: str,
+        password_hash: str,
+        is_admin: bool = False,
+        google_sub: str | None = None,
+        provider: str = PROVIDER_PASSWORD,
+    ) -> CloudUser:
         ref = self._fs.collection(USERS_COLLECTION).document()
+        sub = (google_sub or "").strip() or None
         payload = {
             "email": email,
             "password_hash": password_hash,
             "is_admin": bool(is_admin),
+            "google_sub": sub,
+            "provider": provider or PROVIDER_PASSWORD,
             "created_at": datetime.now(timezone.utc),
         }
         ref.set(payload)
@@ -186,7 +218,19 @@ class CloudStore:
             password_hash=password_hash,
             is_admin=bool(is_admin),
             created_at=_naive_utc(payload["created_at"]),
+            google_sub=sub,
+            provider=payload["provider"],
         )
+
+    def link_google(self, user: CloudUser, google_sub: str) -> CloudUser:
+        """Attach a verified Google subject. Keeps any existing password hash."""
+        sub = google_sub.strip()
+        self._fs.collection(USERS_COLLECTION).document(user.id).update(
+            {"google_sub": sub, "provider": PROVIDER_GOOGLE}
+        )
+        user.google_sub = sub
+        user.provider = PROVIDER_GOOGLE
+        return user
 
     def upsert_admin(self, email: str, password_hash: str) -> CloudUser:
         user = self.get_user_by_email(email)

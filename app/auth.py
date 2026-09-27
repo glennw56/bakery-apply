@@ -14,12 +14,22 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 SESSION_USER_KEY = "user_id"
 
+# Stored on Google-only applicants so password_hash stays non-null and
+# verify_password fails closed instead of raising on a non-bcrypt value.
+UNUSABLE_PASSWORD_HASH = "!google"
+
 
 def hash_password(plain: str) -> str:
     return pwd_context.hash(plain)
 
 
+def password_is_usable(hashed: str) -> bool:
+    return bool(hashed) and hashed.startswith("$2")
+
+
 def verify_password(plain: str, hashed: str) -> bool:
+    if not password_is_usable(hashed):
+        return False
     return pwd_context.verify(plain, hashed)
 
 

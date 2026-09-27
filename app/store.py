@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 from app import db as sqlite_db
 from app.backend import resume_attachment_name, use_cloud_backend
 from app.models import (
+    PROVIDER_GOOGLE,
+    PROVIDER_PASSWORD,
     SEED_POSITION_DESCRIPTION,
     SEED_POSITION_HOURS,
     SEED_POSITION_PAY_CENTS,
@@ -47,9 +49,37 @@ class SqliteStore:
     def get_user_by_email(self, email: str) -> User | None:
         return self.db.scalar(select(User).where(User.email == email))
 
-    def create_user(self, email: str, password_hash: str, is_admin: bool = False) -> User:
-        user = User(email=email, password_hash=password_hash, is_admin=is_admin)
+    def get_user_by_google_sub(self, google_sub: str) -> User | None:
+        sub = (google_sub or "").strip()
+        if not sub:
+            return None
+        return self.db.scalar(select(User).where(User.google_sub == sub))
+
+    def create_user(
+        self,
+        email: str,
+        password_hash: str,
+        is_admin: bool = False,
+        google_sub: str | None = None,
+        provider: str = PROVIDER_PASSWORD,
+    ) -> User:
+        sub = (google_sub or "").strip() or None
+        user = User(
+            email=email,
+            password_hash=password_hash,
+            is_admin=is_admin,
+            google_sub=sub,
+            provider=provider or PROVIDER_PASSWORD,
+        )
         self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+    def link_google(self, user: User, google_sub: str) -> User:
+        """Attach a verified Google subject. Keeps any existing password hash."""
+        user.google_sub = google_sub.strip()
+        user.provider = PROVIDER_GOOGLE
         self.db.commit()
         self.db.refresh(user)
         return user

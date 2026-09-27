@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import (
+    UNUSABLE_PASSWORD_HASH,
     LoginRedirect,
     get_current_user,
     hash_password,
@@ -27,6 +28,7 @@ from app.auth import (
     login_user,
     logout_user,
     normalize_email,
+    password_is_usable,
     require_admin,
     require_login,
     seed_admin,
@@ -34,9 +36,21 @@ from app.auth import (
 )
 from app.backend import session_https_only
 from app.db import init_db
+from app.google_oauth import (
+    OAUTH_STATE_SESSION_KEY,
+    GoogleOAuthError,
+    build_authorize_url,
+    email_is_verified,
+    exchange_code,
+    fetch_userinfo,
+    google_configured,
+    new_oauth_state,
+    oauth_states_match,
+)
 from app.models import (
     HEAR_ABOUT_CHOICES,
     HEAR_ABOUT_SLUGS,
+    PROVIDER_GOOGLE,
     STATUS_SUBMITTED,
     YES_NO,
 )
@@ -211,7 +225,10 @@ def signup(
         return _redirect("/signup")
     existing = store.get_user_by_email(email_n)
     if existing is not None:
-        _flash(request, "That email already has an account. Log in instead.")
+        if not password_is_usable(existing.password_hash):
+            _flash(request, "That email uses Sign in with Google.")
+        else:
+            _flash(request, "That email already has an account. Log in instead.")
         return _redirect("/login")
     user = store.create_user(email_n, hash_password(password), is_admin=False)
     login_user(request, user)
@@ -236,14 +253,100 @@ def login(
     email_n = normalize_email(email)
     user = store.get_user_by_email(email_n)
     if user is None or not verify_password(password, user.password_hash):
-        _flash(request, "Email or password did not match.")
+        if user is not None and not password_is_usable(user.password_hash):
+            _flash(request, "That email uses Sign in with Google.")
+        else:
+            _flash(request, "Email or password did not match.")
         return _redirect("/login")
     login_user(request, user)
+    return _after_login(store, user)
+
+
+@app.get("/auth/google/start")
+def google_start(request: Request, store=Depends(get_store)):
+    """Send the browser to Google with a session state (CSRF)."""
+    user = get_current_user(request, store)
+    if user is not None:
+        return _redirect("/admin" if user.is_admin else "/apply")
+    if not google_configured():
+        _flash(request, "Google sign-in is not configured yet. Use email instead.")
+        return _redirect("/login")
+    state = new_oauth_state()
+    request.session[OAUTH_STATE_SESSION_KEY] = state
+    return RedirectResponse(url=build_authorize_url(state), status_code=302)
+
+
+@app.get("/auth/google/callback")
+def google_callback(
+    request: Request,
+    store=Depends(get_store),
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+):
+    """Exchange the code, require a verified email, then open an applicant session."""
+    expected = request.session.pop(OAUTH_STATE_SESSION_KEY, None)
+    if not oauth_states_match(expected, state):
+        _flash(request, "Google sign-in could not be confirmed. Try again.")
+        return _redirect("/login")
+    if error or not code:
+        _flash(request, "Google sign-in was cancelled. Try again.")
+        return _redirect("/login")
+    try:
+        token = exchange_code(code)
+        info = fetch_userinfo(token["access_token"])
+    except GoogleOAuthError:
+        _flash(request, "Google sign-in did not complete. Try again.")
+        return _redirect("/login")
+    if not email_is_verified(info):
+        _flash(request, "Google did not verify that email. Use a verified Google account.")
+        return _redirect("/login")
+    email_n = normalize_email(str(info.get("email") or ""))
+    google_sub = str(info.get("sub") or "").strip()
+    if not email_n or "@" not in email_n or len(email_n) > 255:
+        _flash(request, "Google did not return a usable email.")
+        return _redirect("/login")
+    if not google_sub or len(google_sub) > 255:
+        _flash(request, "Google did not return a usable account id.")
+        return _redirect("/login")
+    user, problem = _applicant_from_google(store, email_n, google_sub)
+    if problem or user is None:
+        _flash(request, problem or "Google sign-in did not complete. Try again.")
+        return _redirect("/login")
+    login_user(request, user)
+    return _after_login(store, user)
+
+
+def _after_login(store, user):
     if user.is_admin:
         return _redirect("/admin")
     if store.get_application_for_user(user.id) is not None:
         return _redirect("/application")
     return _redirect("/apply")
+
+
+def _applicant_from_google(store, email: str, google_sub: str):
+    """Create or link an applicant. Admin accounts are never signed in here."""
+    by_sub = store.get_user_by_google_sub(google_sub)
+    if by_sub is not None:
+        if by_sub.is_admin:
+            return None, "Admin accounts sign in with email and password."
+        return by_sub, None
+    existing = store.get_user_by_email(email)
+    if existing is not None:
+        if existing.is_admin:
+            return None, "Admin accounts sign in with email and password."
+        if existing.google_sub and existing.google_sub != google_sub:
+            return None, "That email is linked to a different Google account."
+        return store.link_google(existing, google_sub), None
+    user = store.create_user(
+        email,
+        UNUSABLE_PASSWORD_HASH,
+        is_admin=False,
+        google_sub=google_sub,
+        provider=PROVIDER_GOOGLE,
+    )
+    return user, None
 
 
 @app.post("/logout")

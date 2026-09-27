@@ -109,8 +109,30 @@ def init_db() -> None:
     if not os.environ.get("DATABASE_URL"):
         db_path().parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    _migrate_user_columns()
     _migrate_application_columns()
     _migrate_position_columns()
+
+
+def _migrate_user_columns() -> None:
+    """Add google_sub / provider on an existing local users table."""
+    from sqlalchemy import inspect, text
+
+    from app.models import USER_NEW_COLUMNS
+
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("users")}
+    with engine.begin() as conn:
+        for name, spec in USER_NEW_COLUMNS:
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {spec}"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_google_sub ON users (google_sub)"
+            )
+        )
 
 
 def _migrate_application_columns() -> None:

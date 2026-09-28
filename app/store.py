@@ -24,6 +24,8 @@ from app.models import (
     Application,
     Position,
     User,
+    position_pay_writes,
+    resolve_experience_label,
 )
 
 ROOT = sqlite_db.ROOT
@@ -175,14 +177,26 @@ class SqliteStore:
         self,
         title: str,
         hours_per_week: int,
-        hourly_pay_cents: int,
+        hourly_pay_cents: int | None = None,
         open: bool = True,
         description: str = "",
+        hourly_pay_min_cents: int | None = None,
+        hourly_pay_max_cents: int | None = None,
+        experience_label: str | None = None,
     ) -> Position:
+        pay = position_pay_writes(
+            hourly_pay_cents=hourly_pay_cents,
+            hourly_pay_min_cents=hourly_pay_min_cents,
+            hourly_pay_max_cents=hourly_pay_max_cents,
+            experience_label=experience_label,
+        )
         row = Position(
             title=title.strip(),
             hours_per_week=int(hours_per_week),
-            hourly_pay_cents=int(hourly_pay_cents),
+            hourly_pay_cents=int(pay["hourly_pay_cents"]),
+            hourly_pay_min_cents=int(pay["hourly_pay_min_cents"]),
+            hourly_pay_max_cents=int(pay["hourly_pay_max_cents"]),
+            experience_label=str(pay["experience_label"]),
             open=bool(open),
             description=(description or "").strip(),
         )
@@ -192,6 +206,11 @@ class SqliteStore:
         return row
 
     def update_position(self, position: Position, **fields) -> Position:
+        if "experience_label" in fields:
+            raw = fields["experience_label"]
+            fields["experience_label"] = resolve_experience_label(raw if isinstance(raw, str) else "")
+        if "hourly_pay_min_cents" in fields and "hourly_pay_cents" not in fields:
+            fields["hourly_pay_cents"] = int(fields["hourly_pay_min_cents"])
         for key, value in fields.items():
             setattr(position, key, value)
         self.db.commit()

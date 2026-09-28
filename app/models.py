@@ -60,21 +60,129 @@ USER_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("provider", "VARCHAR(32) DEFAULT 'password' NOT NULL"),
 )
 
+DEFAULT_EXPERIENCE_LABEL = "Starting out"
+
 POSITION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("title", "VARCHAR(128) DEFAULT '' NOT NULL"),
     ("hours_per_week", "INTEGER DEFAULT 0 NOT NULL"),
     ("hourly_pay_cents", "INTEGER DEFAULT 0 NOT NULL"),
     ("open", "BOOLEAN DEFAULT 1 NOT NULL"),
     ("description", "TEXT DEFAULT '' NOT NULL"),
+    # Nullable so an existing row can omit them. Load falls back to hourly_pay_cents.
+    ("hourly_pay_min_cents", "INTEGER"),
+    ("hourly_pay_max_cents", "INTEGER"),
+    ("experience_label", "VARCHAR(64) DEFAULT 'Starting out' NOT NULL"),
 )
+
+
+def _format_dollars(cents: int) -> str:
+    """1300 -> $13. 1350 -> $13.50. Whole dollars drop the decimals."""
+    cents = int(cents)
+    if cents % 100 == 0:
+        return f"${cents // 100}"
+    return f"${cents / 100:.2f}"
 
 
 def format_hourly_pay(cents: int) -> str:
     """1300 -> $13/hour. Uneven cents keep two decimals."""
+    return f"{_format_dollars(cents)}/hour"
+
+
+def format_hourly_pay_range(min_cents: int, max_cents: int) -> str:
+    """Equal ends stay one rate ($14/hour). A wider range uses an en dash ($14–$16/hour)."""
+    lo = int(min_cents)
+    hi = int(max_cents)
+    if lo == hi:
+        return format_hourly_pay(lo)
+    if hi < lo:
+        lo, hi = hi, lo
+    return f"{_format_dollars(lo)}\u2013{_format_dollars(hi)}/hour"
+
+
+def format_pay_dollars_input(cents: int) -> str:
+    """Cents for an admin number input: 1300 -> 13, 1350 -> 13.50."""
     cents = int(cents)
     if cents % 100 == 0:
-        return f"${cents // 100}/hour"
-    return f"${cents / 100:.2f}/hour"
+        return str(cents // 100)
+    return f"{cents / 100:.2f}"
+
+
+def resolve_hourly_bounds(
+    min_cents: int | None,
+    max_cents: int | None,
+    legacy_cents: int | None,
+) -> tuple[int, int]:
+    """If min and max are missing, both ends come from legacy hourly_pay_cents."""
+    if min_cents is None and max_cents is None:
+        base = int(legacy_cents or 0)
+        return base, base
+    if min_cents is None:
+        lo = int(legacy_cents) if legacy_cents is not None else int(max_cents)
+    else:
+        lo = int(min_cents)
+    hi = lo if max_cents is None else int(max_cents)
+    return lo, hi
+
+
+def resolve_experience_label(value: str | None) -> str:
+    text = (value or "").strip()
+    return text or DEFAULT_EXPERIENCE_LABEL
+
+
+def position_pay_writes(
+    *,
+    hourly_pay_cents: int | None = None,
+    hourly_pay_min_cents: int | None = None,
+    hourly_pay_max_cents: int | None = None,
+    experience_label: str | None = None,
+) -> dict[str, int | str]:
+    """Values to persist. hourly_pay_cents stays equal to the minimum for old readers."""
+    lo, hi = resolve_hourly_bounds(hourly_pay_min_cents, hourly_pay_max_cents, hourly_pay_cents)
+    return {
+        "hourly_pay_cents": lo,
+        "hourly_pay_min_cents": lo,
+        "hourly_pay_max_cents": hi,
+        "experience_label": resolve_experience_label(experience_label),
+    }
+
+
+class HourlyPayMixin:
+    """Shared pay-range and experience display for SQLite rows and Firestore docs."""
+
+    @property
+    def _resolved_pay_bounds(self) -> tuple[int, int]:
+        return resolve_hourly_bounds(
+            self.hourly_pay_min_cents,
+            self.hourly_pay_max_cents,
+            self.hourly_pay_cents,
+        )
+
+    @property
+    def hourly_pay_display(self) -> str:
+        lo, hi = self._resolved_pay_bounds
+        return format_hourly_pay_range(lo, hi)
+
+    @property
+    def hours_label(self) -> str:
+        return f"{int(self.hours_per_week)} hours/week"
+
+    @property
+    def experience_display(self) -> str:
+        return resolve_experience_label(self.experience_label)
+
+    @property
+    def pay_min_dollars_input(self) -> str:
+        lo, _hi = self._resolved_pay_bounds
+        return format_pay_dollars_input(lo)
+
+    @property
+    def pay_max_dollars_input(self) -> str:
+        _lo, hi = self._resolved_pay_bounds
+        return format_pay_dollars_input(hi)
+
+    @property
+    def pay_dollars_input(self) -> str:
+        return self.pay_min_dollars_input
 
 
 class User(Base):
@@ -104,7 +212,7 @@ class User(Base):
     )
 
 
-class Position(Base):
+class Position(HourlyPayMixin, Base):
     """A job opening. Public home lists open rows only; admin can add/edit/close."""
 
     __tablename__ = "positions"
@@ -112,24 +220,18 @@ class Position(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(128), nullable=False)
     hours_per_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Legacy single rate. New writes set this to the range minimum.
     hourly_pay_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    hourly_pay_min_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hourly_pay_max_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    experience_label: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_EXPERIENCE_LABEL,
+        server_default=DEFAULT_EXPERIENCE_LABEL,
+    )
     open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-
-    @property
-    def hourly_pay_display(self) -> str:
-        return format_hourly_pay(self.hourly_pay_cents)
-
-    @property
-    def hours_label(self) -> str:
-        return f"{int(self.hours_per_week)} hours/week"
-
-    @property
-    def pay_dollars_input(self) -> str:
-        cents = int(self.hourly_pay_cents)
-        if cents % 100 == 0:
-            return str(cents // 100)
-        return f"{cents / 100:.2f}"
 
 
 class Application(Base):

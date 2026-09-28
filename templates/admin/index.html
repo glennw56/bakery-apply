@@ -13,8 +13,14 @@
     <label>Hours/week
       <input type="number" name="hours_per_week" required min="0" step="1">
     </label>
-    <label>Hourly pay (dollars)
-      <input type="number" name="hourly_pay" required min="0" step="0.01" placeholder="13">
+    <label>Pay from (dollars)
+      <input type="number" name="hourly_pay_min" required min="0" step="0.01" placeholder="13">
+    </label>
+    <label>Pay to (dollars)
+      <input type="number" name="hourly_pay_max" required min="0" step="0.01" placeholder="13">
+    </label>
+    <label>Experience
+      <input type="text" name="experience_label" maxlength="64" value="Starting out">
     </label>
     <label>Description (optional)
       <textarea name="description" rows="3" maxlength="2000"></textarea>
@@ -35,7 +41,7 @@
             <p><strong>{{ p.title }}</strong></p>
             <p class="status">{% if p.open %}open{% else %}closed{% endif %}</p>
           </header>
-          <p>{{ p.hours_per_week }} hours/week · {{ p.hourly_pay_display }}</p>
+          <p>{{ p.hours_per_week }} hours/week · {{ p.hourly_pay_display }} · {{ p.experience_display }}</p>
           {% if p.description %}
             <p>{{ p.description }}</p>
           {% endif %}
@@ -47,8 +53,14 @@
             <label>Hours/week
               <input type="number" name="hours_per_week" required min="0" step="1" value="{{ p.hours_per_week }}">
             </label>
-            <label>Hourly pay (dollars)
-              <input type="number" name="hourly_pay" required min="0" step="0.01" value="{{ p.pay_dollars_input }}">
+            <label>Pay from (dollars)
+              <input type="number" name="hourly_pay_min" required min="0" step="0.01" value="{{ p.pay_min_dollars_input }}">
+            </label>
+            <label>Pay to (dollars)
+              <input type="number" name="hourly_pay_max" required min="0" step="0.01" value="{{ p.pay_max_dollars_input }}">
+            </label>
+            <label>Experience
+              <input type="text" name="experience_label" maxlength="64" value="{{ p.experience_display }}">
             </label>
             <label>Description (optional)
               <textarea name="description" rows="3" maxlength="2000">{{ p.description }}</textarea>

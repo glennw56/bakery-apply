@@ -26,7 +26,7 @@
       <article class="role-card" data-position-id="{{ p.id }}">
         <a class="role-card-link" href="/jobs/{{ p.id }}">
           <h3 class="role-name">{{ p.title }}</h3>
-          <p class="role-meta">{{ p.hours_per_week }} hours/week · {{ p.hourly_pay_display }}</p>
+          <p class="role-meta">{{ p.hours_per_week }} hours/week · {{ p.hourly_pay_display }} · {{ p.experience_display }}</p>
           {% if p.description %}
             <p>{{ p.description }}</p>
           {% endif %}

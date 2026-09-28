@@ -227,7 +227,8 @@ def test_unauthenticated_cannot_hit_admin() -> None:
         data={
             "title": "Sneaky Role",
             "hours_per_week": "10",
-            "hourly_pay": "8",
+            "hourly_pay_min": "8",
+            "hourly_pay_max": "8",
             "open": "true",
         },
         follow_redirects=False,
@@ -284,6 +285,7 @@ def test_no_wage_text_on_pages() -> None:
     assert home.status_code == 200
     assert "$13/hour" in home.text
     assert "40 hours/week" in home.text
+    assert "Starting out" in home.text
     assert "Counter / Cashier" in home.text
     _assert_no_invented_openings(home.text)
     assert "No resume file" not in home.text
@@ -327,6 +329,7 @@ def test_home_no_longer_says_no_resume_file() -> None:
     assert "Resume PDF is optional" in home.text
     assert "$13/hour" in home.text
     assert "40 hours/week" in home.text
+    assert "Starting out" in home.text
     assert "Counter / Cashier" in home.text
     _assert_no_invented_openings(home.text)
 
@@ -348,7 +351,8 @@ def test_admin_post_open_job_shows_on_home() -> None:
         data={
             "title": "Pastry Cook",
             "hours_per_week": "32",
-            "hourly_pay": "16",
+            "hourly_pay_min": "16",
+            "hourly_pay_max": "16",
             "description": "Mix and shape pastry for the case.",
             "open": "true",
         },
@@ -378,7 +382,8 @@ def test_admin_can_close_position_and_it_disappears_from_home() -> None:
         data={
             "title": "Night Porter",
             "hours_per_week": "25",
-            "hourly_pay": "15",
+            "hourly_pay_min": "15",
+            "hourly_pay_max": "15",
             "open": "true",
         },
         follow_redirects=False,
@@ -914,6 +919,7 @@ def test_jobs_are_clickable_and_login_frames_applying() -> None:
     assert "<h1>Counter / Cashier</h1>" in job.text
     assert "$13/hour" in job.text
     assert "40 hours/week" in job.text
+    assert "Starting out" in job.text
     assert "2231 1st Ave S" in job.text
     assert "Log in to apply" in job.text
     assert "Sign up with email" in job.text
@@ -990,7 +996,8 @@ def test_jobs_are_clickable_and_login_frames_applying() -> None:
         data={
             "title": "Bread Runner",
             "hours_per_week": "20",
-            "hourly_pay": "14",
+            "hourly_pay_min": "14",
+            "hourly_pay_max": "14",
             "description": "Restock the bread shelf.",
             "open": "true",
         },
@@ -1037,3 +1044,199 @@ def test_google_sign_in_keeps_selected_job(monkeypatch) -> None:
     )
     assert callback.status_code in (302, 303)
     assert callback.headers["location"].endswith(f"/apply?position_id={pos_id}")
+
+
+def _admin_client() -> TestClient:
+    admin = _client()
+    logged = admin.post(
+        "/login",
+        data={"email": "admin@test.local", "password": "admin-test-password"},
+        follow_redirects=False,
+    )
+    assert logged.status_code in (302, 303)
+    return admin
+
+
+def test_pay_range_display_admin_create_and_legacy_cents() -> None:
+    """Equal rates stay a single dollar amount. A wider range uses an en dash.
+
+    Legacy docs that only have hourly_pay_cents still render that rate, and a
+    missing experience label becomes Starting out.
+    """
+    from app.cloud import CloudPosition
+    from app.models import Position, format_hourly_pay_range
+
+    assert format_hourly_pay_range(1400, 1400) == "$14/hour"
+    assert "$14\u2013$14" not in format_hourly_pay_range(1400, 1400)
+    assert format_hourly_pay_range(1400, 1600) == "$14\u2013$16/hour"
+    assert format_hourly_pay_range(1350, 1600) == "$13.50\u2013$16/hour"
+
+    legacy_doc = CloudPosition(
+        "ophEWXhxBOlXME0qGmpw",
+        {
+            "title": "shift lead",
+            "hours_per_week": 40,
+            "hourly_pay_cents": 1400,
+            "open": True,
+        },
+    )
+    assert legacy_doc.hourly_pay_min_cents == 1400
+    assert legacy_doc.hourly_pay_max_cents == 1400
+    assert legacy_doc.hourly_pay_cents == 1400
+    assert legacy_doc.hourly_pay_display == "$14/hour"
+    assert legacy_doc.experience_display == "Starting out"
+    assert legacy_doc.pay_min_dollars_input == "14"
+    assert legacy_doc.pay_max_dollars_input == "14"
+
+    ranged_doc = CloudPosition(
+        "range-doc",
+        {
+            "title": "shift lead",
+            "hours_per_week": 40,
+            "hourly_pay_cents": 1400,
+            "hourly_pay_min_cents": 1400,
+            "hourly_pay_max_cents": 1600,
+            "open": True,
+        },
+    )
+    assert ranged_doc.hourly_pay_display == "$14\u2013$16/hour"
+    assert ranged_doc.experience_display == "Starting out"
+    assert ranged_doc.hourly_pay_cents == 1400
+
+    closed_baker = CloudPosition(
+        "MhIsQT5RwvNC7yZQ30WS",
+        {
+            "title": "Baker",
+            "hours_per_week": 40,
+            "hourly_pay_cents": 1500,
+            "open": False,
+        },
+    )
+    assert closed_baker.hourly_pay_display == "$15/hour"
+    assert closed_baker.experience_display == "Starting out"
+
+    admin = _admin_client()
+    page = admin.get("/admin")
+    assert "Pay from (dollars)" in page.text
+    assert "Pay to (dollars)" in page.text
+    assert 'name="experience_label"' in page.text
+    assert "Starting out" in page.text
+    assert "Hourly pay (dollars)" not in page.text
+    assert "40 hours/week · $13/hour · Starting out" in page.text
+
+    equal = admin.post(
+        "/admin/positions",
+        data={
+            "title": "Equal Rate Role",
+            "hours_per_week": "40",
+            "hourly_pay_min": "14",
+            "hourly_pay_max": "14",
+            "open": "true",
+        },
+        follow_redirects=False,
+    )
+    assert equal.status_code in (302, 303)
+
+    ranged = admin.post(
+        "/admin/positions",
+        data={
+            "title": "Range Rate Role",
+            "hours_per_week": "40",
+            "hourly_pay_min": "14",
+            "hourly_pay_max": "16",
+            "experience_label": "Starting out",
+            "description": "A posted range.",
+            "open": "true",
+        },
+        follow_redirects=False,
+    )
+    assert ranged.status_code in (302, 303)
+
+    rejected = admin.post(
+        "/admin/positions",
+        data={
+            "title": "Backwards Pay",
+            "hours_per_week": "10",
+            "hourly_pay_min": "16",
+            "hourly_pay_max": "14",
+            "open": "true",
+        },
+        follow_redirects=True,
+    )
+    assert rejected.status_code == 200
+    assert "Pay to must be at least pay from." in rejected.text
+    assert "Backwards Pay" not in rejected.text
+
+    store = open_store()
+    try:
+        equal_row = next(p for p in store.list_positions() if p.title == "Equal Rate Role")
+        range_row = next(p for p in store.list_positions() if p.title == "Range Rate Role")
+        assert equal_row.hourly_pay_cents == 1400
+        assert equal_row.hourly_pay_min_cents == 1400
+        assert equal_row.hourly_pay_max_cents == 1400
+        assert equal_row.experience_label == "Starting out"
+        assert equal_row.hourly_pay_display == "$14/hour"
+        assert range_row.hourly_pay_cents == 1400
+        assert range_row.hourly_pay_min_cents == 1400
+        assert range_row.hourly_pay_max_cents == 1600
+        assert range_row.hourly_pay_display == "$14\u2013$16/hour"
+        assert range_row.experience_display == "Starting out"
+        legacy_row = Position(
+            title="Legacy Cents Role",
+            hours_per_week=40,
+            hourly_pay_cents=1400,
+            hourly_pay_min_cents=None,
+            hourly_pay_max_cents=None,
+            experience_label="",
+            open=True,
+            description="",
+        )
+        store.db.add(legacy_row)
+        store.db.commit()
+        store.db.refresh(legacy_row)
+        legacy_id = legacy_row.id
+        assert legacy_row.hourly_pay_display == "$14/hour"
+        assert legacy_row.experience_display == "Starting out"
+    finally:
+        store.close()
+
+    saved = admin.post(
+        f"/admin/positions/{range_row.id}",
+        data={
+            "action": "save",
+            "title": "Range Rate Role",
+            "hours_per_week": "40",
+            "hourly_pay_min": "14",
+            "hourly_pay_max": "16",
+            "experience_label": "Starting out",
+            "description": "A posted range.",
+            "open": "true",
+        },
+        follow_redirects=False,
+    )
+    assert saved.status_code in (302, 303)
+
+    home = _client().get("/")
+    assert "40 hours/week · $14/hour · Starting out" in home.text
+    assert "40 hours/week · $14\u2013$16/hour · Starting out" in home.text
+    assert "$14\u2013$14/hour" not in home.text
+    job = _client().get(f"/jobs/{range_row.id}")
+    assert job.status_code == 200
+    assert "40 hours/week · $14\u2013$16/hour · Starting out" in job.text
+    legacy_job = _client().get(f"/jobs/{legacy_id}")
+    assert legacy_job.status_code == 200
+    assert "Legacy Cents Role" in legacy_job.text
+    assert "40 hours/week · $14/hour · Starting out" in legacy_job.text
+
+    summary = admin.get("/admin")
+    assert "40 hours/week · $14/hour · Starting out" in summary.text
+    assert "40 hours/week · $14\u2013$16/hour · Starting out" in summary.text
+
+    store = open_store()
+    try:
+        for title in ("Equal Rate Role", "Range Rate Role", "Legacy Cents Role"):
+            row = next(p for p in store.list_positions() if p.title == title)
+            store.db.delete(row)
+        store.db.commit()
+    finally:
+        store.close()

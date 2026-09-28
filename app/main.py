@@ -55,6 +55,7 @@ from app.models import (
     PROVIDER_GOOGLE,
     STATUS_SUBMITTED,
     YES_NO,
+    resolve_experience_label,
 )
 from app.store import get_store, seed_positions
 
@@ -287,6 +288,36 @@ def _parse_pay_cents(raw: str) -> int | None:
 
 def _is_open_value(value: str | None) -> bool:
     return (value or "").strip().lower() in ("1", "true", "on", "yes")
+
+
+def _position_fields_from_form(
+    title: str,
+    hours_per_week: str,
+    hourly_pay_min: str,
+    hourly_pay_max: str,
+    experience_label: str,
+    description: str,
+    open: str | None,
+) -> tuple[dict | None, str | None]:
+    """Validate admin pay range. Both ends are required and pay-to is at least pay-from."""
+    title = title.strip()
+    hours = _parse_hours(hours_per_week)
+    lo = _parse_pay_cents(hourly_pay_min)
+    hi = _parse_pay_cents(hourly_pay_max)
+    if not title or hours is None or lo is None or hi is None:
+        return None, "Title, hours/week, pay from, and pay to (dollars) are required."
+    if hi < lo:
+        return None, "Pay to must be at least pay from."
+    return {
+        "title": title,
+        "hours_per_week": hours,
+        "hourly_pay_cents": lo,
+        "hourly_pay_min_cents": lo,
+        "hourly_pay_max_cents": hi,
+        "experience_label": resolve_experience_label(experience_label),
+        "open": _is_open_value(open),
+        "description": description.strip(),
+    }, None
 
 
 # --- Public hiring page -------------------------------------------------------
@@ -732,26 +763,28 @@ def admin_create_position(
     request: Request,
     title: str = Form(""),
     hours_per_week: str = Form(""),
-    hourly_pay: str = Form(""),
+    hourly_pay_min: str = Form(""),
+    hourly_pay_max: str = Form(""),
+    experience_label: str = Form(""),
     description: str = Form(""),
     open: str | None = Form(None),
     admin=Depends(require_admin),
     store=Depends(get_store),
 ):
     _ = admin
-    title = title.strip()
-    hours = _parse_hours(hours_per_week)
-    cents = _parse_pay_cents(hourly_pay)
-    if not title or hours is None or cents is None:
-        _flash(request, "Title, hours/week, and hourly pay (dollars) are required.")
-        return _redirect("/admin")
-    store.create_position(
-        title=title,
-        hours_per_week=hours,
-        hourly_pay_cents=cents,
-        open=_is_open_value(open),
-        description=description.strip(),
+    fields, error = _position_fields_from_form(
+        title,
+        hours_per_week,
+        hourly_pay_min,
+        hourly_pay_max,
+        experience_label,
+        description,
+        open,
     )
+    if error or fields is None:
+        _flash(request, error or "Title, hours/week, pay from, and pay to (dollars) are required.")
+        return _redirect("/admin")
+    store.create_position(**fields)
     _flash(request, "Position added.")
     return _redirect("/admin")
 
@@ -762,7 +795,9 @@ def admin_update_position(
     request: Request,
     title: str = Form(""),
     hours_per_week: str = Form(""),
-    hourly_pay: str = Form(""),
+    hourly_pay_min: str = Form(""),
+    hourly_pay_max: str = Form(""),
+    experience_label: str = Form(""),
     description: str = Form(""),
     open: str | None = Form(None),
     action: str = Form(""),
@@ -783,19 +818,18 @@ def admin_update_position(
         store.update_position(row, open=True)
         _flash(request, "Position reopened.")
         return _redirect("/admin")
-    title = title.strip()
-    hours = _parse_hours(hours_per_week)
-    cents = _parse_pay_cents(hourly_pay)
-    if not title or hours is None or cents is None:
-        _flash(request, "Title, hours/week, and hourly pay (dollars) are required.")
-        return _redirect("/admin")
-    store.update_position(
-        row,
-        title=title,
-        hours_per_week=hours,
-        hourly_pay_cents=cents,
-        open=_is_open_value(open),
-        description=description.strip(),
+    fields, error = _position_fields_from_form(
+        title,
+        hours_per_week,
+        hourly_pay_min,
+        hourly_pay_max,
+        experience_label,
+        description,
+        open,
     )
+    if error or fields is None:
+        _flash(request, error or "Title, hours/week, pay from, and pay to (dollars) are required.")
+        return _redirect("/admin")
+    store.update_position(row, **fields)
     _flash(request, "Position saved.")
     return _redirect("/admin")

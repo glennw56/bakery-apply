@@ -100,12 +100,29 @@ def format_hourly_pay(cents: int) -> str:
     return f"{_format_dollars(cents)}/hour"
 
 
-def format_hourly_pay_range(min_cents: int, max_cents: int) -> str:
-    """Equal ends stay one rate ($14/hour). A wider range is $12–14/hour (en dash, one $)."""
+def _ordered_pay_bounds(min_cents: int, max_cents: int) -> tuple[int, int]:
     lo = int(min_cents)
     hi = int(max_cents)
     if hi < lo:
-        lo, hi = hi, lo
+        return hi, lo
+    return lo, hi
+
+
+def format_starting_hourly_pay(min_cents: int, max_cents: int | None = None) -> str:
+    """Public hiring copy. Dollar sign follows "starting at"; amount is the range minimum.
+
+    1200, 1400 -> starting at $12/hour. Equal ends stay that one rate.
+    1350 -> starting at $13.50/hour.
+    """
+    lo = int(min_cents)
+    if max_cents is not None:
+        lo, _hi = _ordered_pay_bounds(lo, max_cents)
+    return f"starting at {format_hourly_pay(lo)}"
+
+
+def format_hourly_pay_range(min_cents: int, max_cents: int) -> str:
+    """Admin range. Equal ends stay one rate ($14/hour). A wider range is $12–14/hour (en dash, one $)."""
+    lo, hi = _ordered_pay_bounds(min_cents, max_cents)
     if lo == hi:
         return format_hourly_pay(lo)
     high = _format_dollars(hi)
@@ -178,6 +195,13 @@ class HourlyPayMixin:
 
     @property
     def hourly_pay_display(self) -> str:
+        """Public cards and job pages: starting at the range minimum."""
+        lo, hi = self._resolved_pay_bounds
+        return format_starting_hourly_pay(lo, hi)
+
+    @property
+    def hourly_pay_range_display(self) -> str:
+        """Full from–to rate. Admin keeps this beside the pay fields."""
         lo, hi = self._resolved_pay_bounds
         return format_hourly_pay_range(lo, hi)
 
@@ -189,12 +213,21 @@ class HourlyPayMixin:
     def experience_display(self) -> str:
         return STARTING_OUT_LABEL if self.starting_out else ""
 
-    @property
-    def role_meta(self) -> str:
-        line = f"{int(self.hours_per_week)} hours/week · {self.hourly_pay_display}"
+    def _role_meta(self, pay: str) -> str:
+        line = f"{int(self.hours_per_week)} hours/week · {pay}"
         if self.starting_out:
             line = f"{line} · {STARTING_OUT_LABEL}"
         return line
+
+    @property
+    def role_meta(self) -> str:
+        """Public hiring meta. Starting out stays a separate label."""
+        return self._role_meta(self.hourly_pay_display)
+
+    @property
+    def admin_role_meta(self) -> str:
+        """Admin list line. Shows the full range so from/to edits stay obvious."""
+        return self._role_meta(self.hourly_pay_range_display)
 
     @property
     def pay_min_dollars_input(self) -> str:

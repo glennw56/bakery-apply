@@ -42,7 +42,7 @@
             <p><strong>{{ p.title }}</strong></p>
             <p class="status">{% if p.open %}open{% else %}closed{% endif %}</p>
           </header>
-          <p>{{ p.role_meta }}</p>
+          <p>{{ p.admin_role_meta }}</p>
           {% if p.description %}
             <p>{{ p.description }}</p>
           {% endif %}

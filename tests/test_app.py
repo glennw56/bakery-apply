@@ -1058,11 +1058,13 @@ def _admin_client() -> TestClient:
 
 
 def test_pay_range_display_admin_create_and_legacy_cents() -> None:
-    """Public pay is "starting at" the range minimum. Admin still shows the full range.
+    """Public pay is "starting at" plus the full range when the ends differ.
 
-    Equal rates stay one amount on the admin range helper. A wider range uses an en dash
-    and one dollar sign there. Legacy docs that only have hourly_pay_cents still render
-    that rate. Starting out is omitted unless starting_out is true. Shift lead stays unlabeled.
+    Equal rates stay one amount (starting at $14/hour). A wider range uses an en dash
+    and one dollar sign (starting at $12–14/hour). Admin still shows the bare range
+    beside separate Pay from / Pay to fields. Legacy docs that only have
+    hourly_pay_cents still render that rate. Starting out is omitted unless
+    starting_out is true. Shift lead stays unlabeled.
     """
     from app.cloud import CloudPosition
     from app.models import (
@@ -1077,9 +1079,11 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
     from app.store import create_tasting_position
 
     assert format_starting_hourly_pay(1400, 1400) == "starting at $14/hour"
-    assert format_starting_hourly_pay(1200, 1400) == "starting at $12/hour"
+    assert format_starting_hourly_pay(1200, 1400) == "starting at $12\u201314/hour"
     assert format_starting_hourly_pay(1350) == "starting at $13.50/hour"
-    assert format_starting_hourly_pay(1600, 1400) == "starting at $14/hour"
+    assert format_starting_hourly_pay(1350, 1600) == "starting at $13.50\u201316/hour"
+    assert format_starting_hourly_pay(1600, 1400) == "starting at $14\u201316/hour"
+    assert "$12\u2013$14" not in format_starting_hourly_pay(1200, 1400)
     assert format_hourly_pay_range(1400, 1400) == "$14/hour"
     assert "$14\u2013$14" not in format_hourly_pay_range(1400, 1400)
     assert format_hourly_pay_range(1400, 1600) == "$14\u201316/hour"
@@ -1119,10 +1123,10 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
             "open": True,
         },
     )
-    assert ranged_doc.hourly_pay_display == "starting at $12/hour"
+    assert ranged_doc.hourly_pay_display == "starting at $12\u201314/hour"
     assert ranged_doc.hourly_pay_range_display == "$12\u201314/hour"
     assert ranged_doc.experience_display == "Starting out"
-    assert ranged_doc.role_meta == "20 hours/week · starting at $12/hour · Starting out"
+    assert ranged_doc.role_meta == "20 hours/week · starting at $12\u201314/hour · Starting out"
     assert ranged_doc.admin_role_meta == "20 hours/week · $12\u201314/hour · Starting out"
     assert ranged_doc.hourly_pay_cents == 1200
 
@@ -1209,9 +1213,9 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
         assert range_row.hourly_pay_min_cents == 1400
         assert range_row.hourly_pay_max_cents == 1600
         assert range_row.starting_out is True
-        assert range_row.hourly_pay_display == "starting at $14/hour"
+        assert range_row.hourly_pay_display == "starting at $14\u201316/hour"
         assert range_row.hourly_pay_range_display == "$14\u201316/hour"
-        assert range_row.role_meta == "40 hours/week · starting at $14/hour · Starting out"
+        assert range_row.role_meta == "40 hours/week · starting at $14\u201316/hour · Starting out"
         assert range_row.admin_role_meta == "40 hours/week · $14\u201316/hour · Starting out"
         legacy_row = Position(
             title="Legacy Cents Role",
@@ -1239,9 +1243,9 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
         assert tasting.starting_out is True
         assert tasting.open is True
         assert tasting.description == TASTING_DESCRIPTION
-        assert tasting.hourly_pay_display == "starting at $12/hour"
+        assert tasting.hourly_pay_display == "starting at $12\u201314/hour"
         assert tasting.hourly_pay_range_display == "$12\u201314/hour"
-        assert tasting.role_meta == "20 hours/week · starting at $12/hour · Starting out"
+        assert tasting.role_meta == "20 hours/week · starting at $12\u201314/hour · Starting out"
         assert tasting.admin_role_meta == "20 hours/week · $12\u201314/hour · Starting out"
         tasting_id = tasting.id
     finally:
@@ -1264,19 +1268,20 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
     assert saved.status_code in (302, 303)
 
     home = _client().get("/")
-    assert "40 hours/week · starting at $14/hour · Starting out" in home.text
-    assert "20 hours/week · starting at $12/hour · Starting out" in home.text
+    assert "40 hours/week · starting at $14\u201316/hour · Starting out" in home.text
+    assert "20 hours/week · starting at $12\u201314/hour · Starting out" in home.text
     equal_at = home.text.index("Equal Rate Role")
     equal_card = home.text[equal_at: home.text.index("</article>", equal_at)]
     assert "40 hours/week · starting at $14/hour" in equal_card
     assert "Starting out" not in equal_card
     assert "$14\u2013$14/hour" not in home.text
-    assert "$14\u201316/hour" not in home.text
-    assert "$12\u201314/hour" not in home.text
+    assert "$14\u201314/hour" not in home.text
+    assert "$14\u2013$16/hour" not in home.text
+    assert "$12\u2013$14/hour" not in home.text
     job = _client().get(f"/jobs/{range_row.id}")
     assert job.status_code == 200
-    assert "40 hours/week · starting at $14/hour · Starting out" in job.text
-    assert "$14\u201316/hour" not in job.text
+    assert "40 hours/week · starting at $14\u201316/hour · Starting out" in job.text
+    assert "$14\u2013$16/hour" not in job.text
     legacy_job = _client().get(f"/jobs/{legacy_id}")
     assert legacy_job.status_code == 200
     assert "Legacy Cents Role" in legacy_job.text
@@ -1285,8 +1290,8 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
     tasting_job = _client().get(f"/jobs/{tasting_id}")
     assert tasting_job.status_code == 200
     assert "<h1>Tasting</h1>" in tasting_job.text
-    assert "20 hours/week · starting at $12/hour · Starting out" in tasting_job.text
-    assert "$12\u201314/hour" not in tasting_job.text
+    assert "20 hours/week · starting at $12\u201314/hour · Starting out" in tasting_job.text
+    assert "$12\u2013$14/hour" not in tasting_job.text
     assert TASTING_DESCRIPTION in tasting_job.text
 
     summary = admin.get("/admin")

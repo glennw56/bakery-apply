@@ -109,15 +109,16 @@ def _ordered_pay_bounds(min_cents: int, max_cents: int) -> tuple[int, int]:
 
 
 def format_starting_hourly_pay(min_cents: int, max_cents: int | None = None) -> str:
-    """Public hiring copy. Dollar sign follows "starting at"; amount is the range minimum.
+    """Public hiring copy. Dollar sign follows "starting at".
 
-    1200, 1400 -> starting at $12/hour. Equal ends stay that one rate.
-    1350 -> starting at $13.50/hour.
+    A wider range keeps both ends: 1200, 1400 -> starting at $12–14/hour.
+    Equal ends stay one rate: 1400, 1400 -> starting at $14/hour.
+    A single amount stays that rate: 1350 -> starting at $13.50/hour.
     """
     lo = int(min_cents)
-    if max_cents is not None:
-        lo, _hi = _ordered_pay_bounds(lo, max_cents)
-    return f"starting at {format_hourly_pay(lo)}"
+    if max_cents is None:
+        return f"starting at {format_hourly_pay(lo)}"
+    return f"starting at {format_hourly_pay_range(lo, max_cents)}"
 
 
 def format_hourly_pay_range(min_cents: int, max_cents: int) -> str:
@@ -195,7 +196,7 @@ class HourlyPayMixin:
 
     @property
     def hourly_pay_display(self) -> str:
-        """Public cards and job pages: starting at the range minimum."""
+        """Public cards and job pages: starting at the rate, or the full range when the ends differ."""
         lo, hi = self._resolved_pay_bounds
         return format_starting_hourly_pay(lo, hi)
 

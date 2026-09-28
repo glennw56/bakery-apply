@@ -3,7 +3,7 @@
 {% block content %}
   <p class="hint"><a href="/">All open jobs</a></p>
   <h1>{{ position.title }}</h1>
-  <p class="role-meta">{{ position.hours_per_week }} hours/week · {{ position.hourly_pay_display }}</p>
+  <p class="role-meta">{{ position.role_meta }}</p>
   {% if position.description %}
     <p class="job-description">{{ position.description }}</p>
   {% endif %}

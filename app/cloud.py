@@ -28,7 +28,10 @@ from app.models import (
     ROLE_COUNTER,
     STATUS_REVIEWED,
     STATUS_SUBMITTED,
-    format_hourly_pay,
+    HourlyPayMixin,
+    coerce_starting_out,
+    position_pay_writes,
+    resolve_hourly_bounds,
 )
 
 USERS_COLLECTION = "users"
@@ -65,29 +68,26 @@ class CloudUser:
         self.provider = provider or PROVIDER_PASSWORD
 
 
-class CloudPosition:
+class CloudPosition(HourlyPayMixin):
     def __init__(self, id: str, data: dict) -> None:
         self.id = id
         self.title = data.get("title") or ""
         self.hours_per_week = int(data.get("hours_per_week") or 0)
-        self.hourly_pay_cents = int(data.get("hourly_pay_cents") or 0)
+        legacy = data.get("hourly_pay_cents")
+        min_raw = data.get("hourly_pay_min_cents")
+        max_raw = data.get("hourly_pay_max_cents")
+        lo, hi = resolve_hourly_bounds(
+            int(min_raw) if min_raw is not None else None,
+            int(max_raw) if max_raw is not None else None,
+            int(legacy) if legacy is not None else None,
+        )
+        self.hourly_pay_min_cents = lo
+        self.hourly_pay_max_cents = hi
+        # Leave a stored single rate alone on read. Missing legacy follows the minimum.
+        self.hourly_pay_cents = int(legacy) if legacy is not None else lo
         self.open = bool(data.get("open"))
         self.description = data.get("description") or ""
-
-    @property
-    def hourly_pay_display(self) -> str:
-        return format_hourly_pay(self.hourly_pay_cents)
-
-    @property
-    def hours_label(self) -> str:
-        return f"{int(self.hours_per_week)} hours/week"
-
-    @property
-    def pay_dollars_input(self) -> str:
-        cents = int(self.hourly_pay_cents)
-        if cents % 100 == 0:
-            return str(cents // 100)
-        return f"{cents / 100:.2f}"
+        self.starting_out = coerce_starting_out(data.get("starting_out"))
 
 
 class CloudApplication:
@@ -377,15 +377,26 @@ class CloudStore:
         self,
         title: str,
         hours_per_week: int,
-        hourly_pay_cents: int,
+        hourly_pay_cents: int | None = None,
         open: bool = True,
         description: str = "",
+        hourly_pay_min_cents: int | None = None,
+        hourly_pay_max_cents: int | None = None,
+        starting_out: bool = False,
     ) -> CloudPosition:
         ref = self._fs.collection(POSITIONS_COLLECTION).document()
+        pay = position_pay_writes(
+            hourly_pay_cents=hourly_pay_cents,
+            hourly_pay_min_cents=hourly_pay_min_cents,
+            hourly_pay_max_cents=hourly_pay_max_cents,
+        )
         payload = {
             "title": title.strip(),
             "hours_per_week": int(hours_per_week),
-            "hourly_pay_cents": int(hourly_pay_cents),
+            "hourly_pay_cents": int(pay["hourly_pay_cents"]),
+            "hourly_pay_min_cents": int(pay["hourly_pay_min_cents"]),
+            "hourly_pay_max_cents": int(pay["hourly_pay_max_cents"]),
+            "starting_out": coerce_starting_out(starting_out),
             "open": bool(open),
             "description": (description or "").strip(),
         }
@@ -393,18 +404,38 @@ class CloudStore:
         return CloudPosition(ref.id, payload)
 
     def update_position(self, position: CloudPosition, **fields) -> CloudPosition:
+        allowed = (
+            "title",
+            "hours_per_week",
+            "hourly_pay_cents",
+            "hourly_pay_min_cents",
+            "hourly_pay_max_cents",
+            "starting_out",
+            "open",
+            "description",
+        )
+        int_keys = {
+            "hours_per_week",
+            "hourly_pay_cents",
+            "hourly_pay_min_cents",
+            "hourly_pay_max_cents",
+        }
         payload = {}
-        for key in ("title", "hours_per_week", "hourly_pay_cents", "open", "description"):
-            if key in fields:
-                value = fields[key]
-                if key == "title" or key == "description":
-                    value = (value or "").strip() if isinstance(value, str) else value
-                elif key == "open":
-                    value = bool(value)
-                elif key in ("hours_per_week", "hourly_pay_cents"):
-                    value = int(value)
-                payload[key] = value
-                setattr(position, key, value)
+        for key in allowed:
+            if key not in fields:
+                continue
+            value = fields[key]
+            if key in ("title", "description"):
+                value = (value or "").strip() if isinstance(value, str) else value
+            elif key in ("open", "starting_out"):
+                value = coerce_starting_out(value) if key == "starting_out" else bool(value)
+            elif key in int_keys:
+                value = int(value)
+            payload[key] = value
+            setattr(position, key, value)
+        if "hourly_pay_min_cents" in payload and "hourly_pay_cents" not in payload:
+            payload["hourly_pay_cents"] = payload["hourly_pay_min_cents"]
+            position.hourly_pay_cents = payload["hourly_pay_cents"]
         if payload:
             self._fs.collection(POSITIONS_COLLECTION).document(str(position.id)).update(payload)
         return position

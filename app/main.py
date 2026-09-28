@@ -55,7 +55,6 @@ from app.models import (
     PROVIDER_GOOGLE,
     STATUS_SUBMITTED,
     YES_NO,
-    resolve_experience_label,
 )
 from app.store import get_store, seed_positions
 
@@ -295,9 +294,9 @@ def _position_fields_from_form(
     hours_per_week: str,
     hourly_pay_min: str,
     hourly_pay_max: str,
-    experience_label: str,
     description: str,
     open: str | None,
+    starting_out: str | None,
 ) -> tuple[dict | None, str | None]:
     """Validate admin pay range. Both ends are required and pay-to is at least pay-from."""
     title = title.strip()
@@ -314,7 +313,7 @@ def _position_fields_from_form(
         "hourly_pay_cents": lo,
         "hourly_pay_min_cents": lo,
         "hourly_pay_max_cents": hi,
-        "experience_label": resolve_experience_label(experience_label),
+        "starting_out": _is_open_value(starting_out),
         "open": _is_open_value(open),
         "description": description.strip(),
     }, None
@@ -765,9 +764,9 @@ def admin_create_position(
     hours_per_week: str = Form(""),
     hourly_pay_min: str = Form(""),
     hourly_pay_max: str = Form(""),
-    experience_label: str = Form(""),
     description: str = Form(""),
     open: str | None = Form(None),
+    starting_out: str | None = Form(None),
     admin=Depends(require_admin),
     store=Depends(get_store),
 ):
@@ -777,9 +776,9 @@ def admin_create_position(
         hours_per_week,
         hourly_pay_min,
         hourly_pay_max,
-        experience_label,
         description,
         open,
+        starting_out,
     )
     if error or fields is None:
         _flash(request, error or "Title, hours/week, pay from, and pay to (dollars) are required.")
@@ -797,9 +796,9 @@ def admin_update_position(
     hours_per_week: str = Form(""),
     hourly_pay_min: str = Form(""),
     hourly_pay_max: str = Form(""),
-    experience_label: str = Form(""),
     description: str = Form(""),
     open: str | None = Form(None),
+    starting_out: str | None = Form(None),
     action: str = Form(""),
     admin=Depends(require_admin),
     store=Depends(get_store),
@@ -823,9 +822,9 @@ def admin_update_position(
         hours_per_week,
         hourly_pay_min,
         hourly_pay_max,
-        experience_label,
         description,
         open,
+        starting_out,
     )
     if error or fields is None:
         _flash(request, error or "Title, hours/week, pay from, and pay to (dollars) are required.")

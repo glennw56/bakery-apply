@@ -60,7 +60,18 @@ USER_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("provider", "VARCHAR(32) DEFAULT 'password' NOT NULL"),
 )
 
-DEFAULT_EXPERIENCE_LABEL = "Starting out"
+STARTING_OUT_LABEL = "Starting out"
+
+# Ronald's entry-level tasting opening. Startup does not insert this.
+# Hours were not set; create_tasting_position() takes hours_per_week.
+# Talent creates the Firestore doc after merge. Do not write prod from here.
+TASTING_TITLE = "Tasting"
+TASTING_PAY_MIN_CENTS = 1200
+TASTING_PAY_MAX_CENTS = 1400
+TASTING_DESCRIPTION = (
+    "Offer samples from the case, tell guests what came out of the oven, "
+    "and keep the tasting spot tidy. No bakery experience required."
+)
 
 POSITION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("title", "VARCHAR(128) DEFAULT '' NOT NULL"),
@@ -71,7 +82,8 @@ POSITION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     # Nullable so an existing row can omit them. Load falls back to hourly_pay_cents.
     ("hourly_pay_min_cents", "INTEGER"),
     ("hourly_pay_max_cents", "INTEGER"),
-    ("experience_label", "VARCHAR(64) DEFAULT 'Starting out' NOT NULL"),
+    # Entry-level flag. Missing or false does not show "Starting out".
+    ("starting_out", "BOOLEAN DEFAULT 0 NOT NULL"),
 )
 
 
@@ -89,14 +101,17 @@ def format_hourly_pay(cents: int) -> str:
 
 
 def format_hourly_pay_range(min_cents: int, max_cents: int) -> str:
-    """Equal ends stay one rate ($14/hour). A wider range uses an en dash ($14–$16/hour)."""
+    """Equal ends stay one rate ($14/hour). A wider range is $12–14/hour (en dash, one $)."""
     lo = int(min_cents)
     hi = int(max_cents)
-    if lo == hi:
-        return format_hourly_pay(lo)
     if hi < lo:
         lo, hi = hi, lo
-    return f"{_format_dollars(lo)}\u2013{_format_dollars(hi)}/hour"
+    if lo == hi:
+        return format_hourly_pay(lo)
+    high = _format_dollars(hi)
+    if high.startswith("$"):
+        high = high[1:]
+    return f"{_format_dollars(lo)}\u2013{high}/hour"
 
 
 def format_pay_dollars_input(cents: int) -> str:
@@ -124,9 +139,15 @@ def resolve_hourly_bounds(
     return lo, hi
 
 
-def resolve_experience_label(value: str | None) -> str:
-    text = (value or "").strip()
-    return text or DEFAULT_EXPERIENCE_LABEL
+def coerce_starting_out(value) -> bool:
+    """Checkbox / Firestore flag. Missing means not entry-level."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "on", "yes"}
 
 
 def position_pay_writes(
@@ -134,15 +155,13 @@ def position_pay_writes(
     hourly_pay_cents: int | None = None,
     hourly_pay_min_cents: int | None = None,
     hourly_pay_max_cents: int | None = None,
-    experience_label: str | None = None,
-) -> dict[str, int | str]:
+) -> dict[str, int]:
     """Values to persist. hourly_pay_cents stays equal to the minimum for old readers."""
     lo, hi = resolve_hourly_bounds(hourly_pay_min_cents, hourly_pay_max_cents, hourly_pay_cents)
     return {
         "hourly_pay_cents": lo,
         "hourly_pay_min_cents": lo,
         "hourly_pay_max_cents": hi,
-        "experience_label": resolve_experience_label(experience_label),
     }
 
 
@@ -168,7 +187,14 @@ class HourlyPayMixin:
 
     @property
     def experience_display(self) -> str:
-        return resolve_experience_label(self.experience_label)
+        return STARTING_OUT_LABEL if self.starting_out else ""
+
+    @property
+    def role_meta(self) -> str:
+        line = f"{int(self.hours_per_week)} hours/week · {self.hourly_pay_display}"
+        if self.starting_out:
+            line = f"{line} · {STARTING_OUT_LABEL}"
+        return line
 
     @property
     def pay_min_dollars_input(self) -> str:
@@ -224,11 +250,8 @@ class Position(HourlyPayMixin, Base):
     hourly_pay_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     hourly_pay_min_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hourly_pay_max_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    experience_label: Mapped[str] = mapped_column(
-        String(64),
-        nullable=False,
-        default=DEFAULT_EXPERIENCE_LABEL,
-        server_default=DEFAULT_EXPERIENCE_LABEL,
+    starting_out: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
     )
     open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")

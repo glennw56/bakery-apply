@@ -21,11 +21,15 @@ from app.models import (
     SEED_POSITION_PAY_CENTS,
     SEED_POSITION_TITLE,
     STATUS_REVIEWED,
+    TASTING_DESCRIPTION,
+    TASTING_PAY_MAX_CENTS,
+    TASTING_PAY_MIN_CENTS,
+    TASTING_TITLE,
     Application,
     Position,
     User,
+    coerce_starting_out,
     position_pay_writes,
-    resolve_experience_label,
 )
 
 ROOT = sqlite_db.ROOT
@@ -182,13 +186,12 @@ class SqliteStore:
         description: str = "",
         hourly_pay_min_cents: int | None = None,
         hourly_pay_max_cents: int | None = None,
-        experience_label: str | None = None,
+        starting_out: bool = False,
     ) -> Position:
         pay = position_pay_writes(
             hourly_pay_cents=hourly_pay_cents,
             hourly_pay_min_cents=hourly_pay_min_cents,
             hourly_pay_max_cents=hourly_pay_max_cents,
-            experience_label=experience_label,
         )
         row = Position(
             title=title.strip(),
@@ -196,7 +199,7 @@ class SqliteStore:
             hourly_pay_cents=int(pay["hourly_pay_cents"]),
             hourly_pay_min_cents=int(pay["hourly_pay_min_cents"]),
             hourly_pay_max_cents=int(pay["hourly_pay_max_cents"]),
-            experience_label=str(pay["experience_label"]),
+            starting_out=coerce_starting_out(starting_out),
             open=bool(open),
             description=(description or "").strip(),
         )
@@ -206,9 +209,8 @@ class SqliteStore:
         return row
 
     def update_position(self, position: Position, **fields) -> Position:
-        if "experience_label" in fields:
-            raw = fields["experience_label"]
-            fields["experience_label"] = resolve_experience_label(raw if isinstance(raw, str) else "")
+        if "starting_out" in fields:
+            fields["starting_out"] = coerce_starting_out(fields["starting_out"])
         if "hourly_pay_min_cents" in fields and "hourly_pay_cents" not in fields:
             fields["hourly_pay_cents"] = int(fields["hourly_pay_min_cents"])
         for key, value in fields.items():
@@ -216,6 +218,23 @@ class SqliteStore:
         self.db.commit()
         self.db.refresh(position)
         return position
+
+
+def create_tasting_position(store, hours_per_week: int):
+    """Insert Ronald's Tasting opening. Not called on startup and does not touch prod.
+
+    Hours were not specified, so the caller passes hours_per_week. Pay is
+    $12–14/hour (1200–1400 cents), starting_out is true, and the job is open.
+    """
+    return store.create_position(
+        title=TASTING_TITLE,
+        hours_per_week=int(hours_per_week),
+        hourly_pay_min_cents=TASTING_PAY_MIN_CENTS,
+        hourly_pay_max_cents=TASTING_PAY_MAX_CENTS,
+        starting_out=True,
+        open=True,
+        description=TASTING_DESCRIPTION,
+    )
 
 
 def seed_positions() -> None:

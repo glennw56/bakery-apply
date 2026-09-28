@@ -29,8 +29,8 @@ from app.models import (
     STATUS_REVIEWED,
     STATUS_SUBMITTED,
     HourlyPayMixin,
+    coerce_starting_out,
     position_pay_writes,
-    resolve_experience_label,
     resolve_hourly_bounds,
 )
 
@@ -87,7 +87,7 @@ class CloudPosition(HourlyPayMixin):
         self.hourly_pay_cents = int(legacy) if legacy is not None else lo
         self.open = bool(data.get("open"))
         self.description = data.get("description") or ""
-        self.experience_label = resolve_experience_label(data.get("experience_label"))
+        self.starting_out = coerce_starting_out(data.get("starting_out"))
 
 
 class CloudApplication:
@@ -382,14 +382,13 @@ class CloudStore:
         description: str = "",
         hourly_pay_min_cents: int | None = None,
         hourly_pay_max_cents: int | None = None,
-        experience_label: str | None = None,
+        starting_out: bool = False,
     ) -> CloudPosition:
         ref = self._fs.collection(POSITIONS_COLLECTION).document()
         pay = position_pay_writes(
             hourly_pay_cents=hourly_pay_cents,
             hourly_pay_min_cents=hourly_pay_min_cents,
             hourly_pay_max_cents=hourly_pay_max_cents,
-            experience_label=experience_label,
         )
         payload = {
             "title": title.strip(),
@@ -397,7 +396,7 @@ class CloudStore:
             "hourly_pay_cents": int(pay["hourly_pay_cents"]),
             "hourly_pay_min_cents": int(pay["hourly_pay_min_cents"]),
             "hourly_pay_max_cents": int(pay["hourly_pay_max_cents"]),
-            "experience_label": str(pay["experience_label"]),
+            "starting_out": coerce_starting_out(starting_out),
             "open": bool(open),
             "description": (description or "").strip(),
         }
@@ -411,7 +410,7 @@ class CloudStore:
             "hourly_pay_cents",
             "hourly_pay_min_cents",
             "hourly_pay_max_cents",
-            "experience_label",
+            "starting_out",
             "open",
             "description",
         )
@@ -428,10 +427,8 @@ class CloudStore:
             value = fields[key]
             if key in ("title", "description"):
                 value = (value or "").strip() if isinstance(value, str) else value
-            elif key == "experience_label":
-                value = resolve_experience_label(value if isinstance(value, str) else "")
-            elif key == "open":
-                value = bool(value)
+            elif key in ("open", "starting_out"):
+                value = coerce_starting_out(value) if key == "starting_out" else bool(value)
             elif key in int_keys:
                 value = int(value)
             payload[key] = value

@@ -55,6 +55,7 @@ from app.models import (
     PROVIDER_GOOGLE,
     STATUS_SUBMITTED,
     YES_NO,
+    normalize_description,
 )
 from app.store import get_store, seed_positions
 
@@ -315,7 +316,7 @@ def _position_fields_from_form(
         "hourly_pay_max_cents": hi,
         "starting_out": _is_open_value(starting_out),
         "open": _is_open_value(open),
-        "description": description.strip(),
+        "description": normalize_description(description),
     }, None
 
 

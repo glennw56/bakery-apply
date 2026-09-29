@@ -44,7 +44,7 @@
           </header>
           <p>{{ p.admin_role_meta }}</p>
           {% if p.description %}
-            <p>{{ p.description }}</p>
+            <p class="job-description">{{ p.description }}</p>
           {% endif %}
           <form class="note-form" method="post" action="/admin/positions/{{ p.id }}">
             <input type="hidden" name="action" value="save">

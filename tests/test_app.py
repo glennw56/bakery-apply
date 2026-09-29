@@ -1307,3 +1307,88 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
         store.db.commit()
     finally:
         store.close()
+
+
+def _description_blocks(html: str) -> list[str]:
+    return re.findall(r'<p class="job-description">(.*?)</p>', html, re.S)
+
+
+def test_public_job_description_keeps_line_breaks_and_escapes_html() -> None:
+    """Newlines an admin types stay in the HTML, and a pre-line class keeps them on screen."""
+    typed = (
+        "Mix dough in the morning.\r\n"
+        "\r\n"
+        "Shape loaves after the first rise.\n"
+        "Handle the oven with <b>care</b>."
+    )
+    expected = (
+        "Mix dough in the morning.\n"
+        "\n"
+        "Shape loaves after the first rise.\n"
+        "Handle the oven with <b>care</b>."
+    )
+    admin = _client()
+    admin.post(
+        "/login",
+        data={"email": "admin@test.local", "password": "admin-test-password"},
+        follow_redirects=False,
+    )
+    created = admin.post(
+        "/admin/positions",
+        data={
+            "title": "Morning Baker",
+            "hours_per_week": "25",
+            "hourly_pay_min": "15",
+            "hourly_pay_max": "16",
+            "description": typed,
+            "open": "true",
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code in (302, 303)
+
+    store = open_store()
+    try:
+        row = next(p for p in store.list_positions() if p.title == "Morning Baker")
+        pos_id = row.id
+        assert row.description == expected
+        assert "\r" not in row.description
+    finally:
+        store.close()
+
+    css = (ROOT / "static" / "app.css").read_text()
+    assert re.search(r"\.job-description\s*\{[^}]*white-space:\s*pre-line", css, re.S)
+
+    def assert_preserved(html: str) -> None:
+        blocks = _description_blocks(html)
+        match = next((block for block in blocks if "Mix dough in the morning." in block), None)
+        assert match is not None
+        assert "Mix dough in the morning.\n\nShape loaves after the first rise." in match
+        assert "Handle the oven with &lt;b&gt;care&lt;/b&gt;." in match
+        assert "<b>" not in match
+        assert "\r" not in match
+
+    public = _client()
+    home = public.get("/")
+    assert home.status_code == 200
+    card_at = home.text.index("Morning Baker")
+    card = home.text[card_at: home.text.index("</article>", card_at)]
+    assert 'class="job-description"' in card
+    assert_preserved(home.text)
+
+    job = public.get(f"/jobs/{pos_id}")
+    assert job.status_code == 200
+    assert_preserved(job.text)
+
+    admin_page = admin.get("/admin")
+    assert admin_page.status_code == 200
+    assert_preserved(admin_page.text)
+    textarea = re.search(
+        r'<textarea name="description"[^>]*>\s*(Mix dough in the morning\..*?)</textarea>',
+        admin_page.text,
+        re.S,
+    )
+    assert textarea is not None
+    assert "Mix dough in the morning.\n\nShape loaves after the first rise." in textarea.group(1)
+    assert "&lt;b&gt;care&lt;/b&gt;" in textarea.group(1)
+    assert "<b>" not in textarea.group(1)

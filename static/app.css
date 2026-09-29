@@ -193,7 +193,10 @@ a.role-card-link:focus-visible {
   padding-left: 1.3rem;
 }
 .how-to-apply li + li { margin-top: 0.15rem; }
-.job-description { max-width: 42rem; }
+.job-description {
+  max-width: 42rem;
+  white-space: pre-line;
+}
 
 .note-form {
   display: grid;

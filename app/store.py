@@ -29,6 +29,7 @@ from app.models import (
     Position,
     User,
     coerce_starting_out,
+    normalize_description,
     position_pay_writes,
 )
 
@@ -201,7 +202,7 @@ class SqliteStore:
             hourly_pay_max_cents=int(pay["hourly_pay_max_cents"]),
             starting_out=coerce_starting_out(starting_out),
             open=bool(open),
-            description=(description or "").strip(),
+            description=normalize_description(description),
         )
         self.db.add(row)
         self.db.commit()
@@ -211,6 +212,8 @@ class SqliteStore:
     def update_position(self, position: Position, **fields) -> Position:
         if "starting_out" in fields:
             fields["starting_out"] = coerce_starting_out(fields["starting_out"])
+        if "description" in fields:
+            fields["description"] = normalize_description(fields["description"])
         if "hourly_pay_min_cents" in fields and "hourly_pay_cents" not in fields:
             fields["hourly_pay_cents"] = int(fields["hourly_pay_min_cents"])
         for key, value in fields.items():

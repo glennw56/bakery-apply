@@ -124,6 +124,11 @@ def chicago_stamp(dt: datetime) -> str:
 
 templates.env.globals["chicago_stamp"] = chicago_stamp
 templates.env.globals["shop_name"] = SHOP_NAME
+try:
+    _STATIC_VERSION = str(int(os.path.getmtime(STATIC_DIR / "app.css")))
+except OSError:
+    _STATIC_VERSION = "1"
+templates.env.globals["static_version"] = _STATIC_VERSION
 templates.env.globals["shop_address"] = SHOP_ADDRESS
 templates.env.globals["shop_phone"] = SHOP_PHONE
 templates.env.globals["hear_about_choices"] = HEAR_ABOUT_CHOICES

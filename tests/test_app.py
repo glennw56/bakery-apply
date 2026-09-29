@@ -1392,3 +1392,9 @@ def test_public_job_description_keeps_line_breaks_and_escapes_html() -> None:
     assert "Mix dough in the morning.\n\nShape loaves after the first rise." in textarea.group(1)
     assert "&lt;b&gt;care&lt;/b&gt;" in textarea.group(1)
     assert "<b>" not in textarea.group(1)
+
+
+def test_home_links_css_with_cache_bust_version() -> None:
+    r = _client().get("/")
+    assert r.status_code == 200
+    assert re.search(r'/static/app\.css\?v=\d+', r.text)

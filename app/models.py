@@ -87,6 +87,12 @@ POSITION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
 )
 
 
+def normalize_description(description: str | None) -> str:
+    """Keep the admin's wording. Only turn CRLF into LF and trim the ends."""
+    text = description or ""
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
 def _format_dollars(cents: int) -> str:
     """1300 -> $13. 1350 -> $13.50. Whole dollars drop the decimals."""
     cents = int(cents)

@@ -30,6 +30,7 @@ from app.models import (
     STATUS_SUBMITTED,
     HourlyPayMixin,
     coerce_starting_out,
+    normalize_description,
     position_pay_writes,
     resolve_hourly_bounds,
 )
@@ -398,7 +399,7 @@ class CloudStore:
             "hourly_pay_max_cents": int(pay["hourly_pay_max_cents"]),
             "starting_out": coerce_starting_out(starting_out),
             "open": bool(open),
-            "description": (description or "").strip(),
+            "description": normalize_description(description),
         }
         ref.set(payload)
         return CloudPosition(ref.id, payload)
@@ -425,7 +426,9 @@ class CloudStore:
             if key not in fields:
                 continue
             value = fields[key]
-            if key in ("title", "description"):
+            if key == "description":
+                value = normalize_description(value if isinstance(value, str) else "")
+            elif key == "title":
                 value = (value or "").strip() if isinstance(value, str) else value
             elif key in ("open", "starting_out"):
                 value = coerce_starting_out(value) if key == "starting_out" else bool(value)

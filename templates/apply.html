@@ -5,6 +5,7 @@
   <p class="lede">{{ shop_address }} · {{ shop_phone }}</p>
   {% if selected_position %}
     <p class="hint">You're applying for {{ selected_position.title }}. You can switch jobs in the list below.</p>
+    <p class="role-meta">{{ selected_position.role_meta }}</p>
   {% endif %}
   {% if not open_positions %}
     <p class="hint">No open positions right now.</p>

@@ -127,6 +127,14 @@ def format_starting_hourly_pay(min_cents: int, max_cents: int | None = None) -> 
     return f"starting at {format_hourly_pay_range(lo, max_cents)}"
 
 
+def format_public_pay_range(min_cents: int, max_cents: int) -> str:
+    """Public range: 1200, 1400 -> $12\u2013$14/hr. Equal ends stay one rate: $14/hr."""
+    lo, hi = _ordered_pay_bounds(min_cents, max_cents)
+    if lo == hi:
+        return f"{_format_dollars(lo)}/hr"
+    return f"{_format_dollars(lo)}\u2013{_format_dollars(hi)}/hr"
+
+
 def format_hourly_pay_range(min_cents: int, max_cents: int) -> str:
     """Admin range. Equal ends stay one rate ($14/hour). A wider range is $12–14/hour (en dash, one $)."""
     lo, hi = _ordered_pay_bounds(min_cents, max_cents)
@@ -227,9 +235,16 @@ class HourlyPayMixin:
         return line
 
     @property
+    def public_pay_line(self) -> str:
+        """Public pay line: "Starting out $12–$14/hr + tip" (Starting out only when flagged)."""
+        lo, hi = self._resolved_pay_bounds
+        line = f"{format_public_pay_range(lo, hi)} + tip"
+        return f"{STARTING_OUT_LABEL} {line}" if self.starting_out else line
+
+    @property
     def role_meta(self) -> str:
-        """Public hiring meta. Starting out stays a separate label."""
-        return self._role_meta(self.hourly_pay_display)
+        """Public hiring meta: hours, then the pay line."""
+        return f"{int(self.hours_per_week)} hours/week · {self.public_pay_line}"
 
     @property
     def admin_role_meta(self) -> str:

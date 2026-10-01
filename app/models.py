@@ -236,10 +236,9 @@ class HourlyPayMixin:
 
     @property
     def public_pay_line(self) -> str:
-        """Public pay line: "Starting out $12–$14/hr + tip" (Starting out only when flagged)."""
+        """Public pay line on every job: "Starting at $12\u2013$14/hr + tip"."""
         lo, hi = self._resolved_pay_bounds
-        line = f"{format_public_pay_range(lo, hi)} + tip"
-        return f"{STARTING_OUT_LABEL} {line}" if self.starting_out else line
+        return f"Starting at {format_public_pay_range(lo, hi)} + tip"
 
     @property
     def role_meta(self) -> str:

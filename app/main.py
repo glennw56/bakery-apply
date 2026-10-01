@@ -38,6 +38,7 @@ from app.auth import (
 )
 from app.backend import session_https_only
 from app.db import init_db
+from app.notify import notify_new_application
 from app.google_oauth import (
     OAUTH_STATE_SESSION_KEY,
     GoogleOAuthError,
@@ -666,6 +667,7 @@ def apply_submit(
     )
     if resume_bytes:
         store.save_resume(app_row, resume_bytes)
+    notify_new_application(app_row, position.title, user.email)
     return _redirect("/application")
 
 

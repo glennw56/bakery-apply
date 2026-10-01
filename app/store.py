@@ -242,6 +242,8 @@ def create_tasting_position(store, hours_per_week: int):
 
 def seed_positions() -> None:
     """If the positions table/collection is empty, insert the Counter / Cashier opening."""
+    if use_cloud_backend():
+        return  # Production never auto-creates jobs; the owner manages them in admin.
     store = open_store()
     try:
         if store.list_positions():

@@ -283,7 +283,7 @@ def test_no_wage_text_on_pages() -> None:
 
     home = pages[0]
     assert home.status_code == 200
-    assert "$13/hr + tip" in home.text
+    assert "Starting at $13/hr + tip" in home.text
     assert "40 hours/week" in home.text
     assert "Starting out" not in home.text
     assert "Counter / Cashier" in home.text
@@ -327,7 +327,7 @@ def test_home_no_longer_says_no_resume_file() -> None:
     assert home.status_code == 200
     assert "No resume file" not in home.text
     assert "Resume PDF is optional" in home.text
-    assert "$13/hr + tip" in home.text
+    assert "Starting at $13/hr + tip" in home.text
     assert "40 hours/week" in home.text
     assert "Starting out" not in home.text
     assert "Counter / Cashier" in home.text
@@ -364,9 +364,9 @@ def test_admin_post_open_job_shows_on_home() -> None:
     assert home.status_code == 200
     assert "Pastry Cook" in home.text
     assert "32" in home.text
-    assert "$16/hr + tip" in home.text
+    assert "Starting at $16/hr + tip" in home.text
     assert "Counter / Cashier" in home.text
-    assert "$13/hr + tip" in home.text
+    assert "Starting at $13/hr + tip" in home.text
 
 
 def test_admin_can_close_position_and_it_disappears_from_home() -> None:
@@ -408,7 +408,7 @@ def test_admin_can_close_position_and_it_disappears_from_home() -> None:
     assert gone.status_code == 200
     assert "Night Porter" not in gone.text
     assert "Counter / Cashier" in gone.text
-    assert "$13/hr + tip" in gone.text
+    assert "Starting at $13/hr + tip" in gone.text
     assert "40 hours/week" in gone.text
 
 
@@ -917,7 +917,7 @@ def test_jobs_are_clickable_and_login_frames_applying() -> None:
     job = client.get(f"/jobs/{pos_id}")
     assert job.status_code == 200
     assert "<h1>Counter / Cashier</h1>" in job.text
-    assert "$13/hr + tip" in job.text
+    assert "Starting at $13/hr + tip" in job.text
     assert "40 hours/week" in job.text
     assert "Starting out" not in job.text
     assert "2231 1st Ave S" in job.text
@@ -1106,7 +1106,7 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
     assert legacy_doc.hourly_pay_display == "starting at $14/hour"
     assert legacy_doc.hourly_pay_range_display == "$14/hour"
     assert legacy_doc.experience_display == ""
-    assert legacy_doc.role_meta == "40 hours/week · $14/hr + tip"
+    assert legacy_doc.role_meta == "40 hours/week · Starting at $14/hr + tip"
     assert legacy_doc.admin_role_meta == "40 hours/week · $14/hour"
     assert legacy_doc.pay_min_dollars_input == "14"
     assert legacy_doc.pay_max_dollars_input == "14"
@@ -1126,7 +1126,7 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
     assert ranged_doc.hourly_pay_display == "starting at $12\u201314/hour"
     assert ranged_doc.hourly_pay_range_display == "$12\u201314/hour"
     assert ranged_doc.experience_display == "Starting out"
-    assert ranged_doc.role_meta == "20 hours/week · Starting out $12\u2013$14/hr + tip"
+    assert ranged_doc.role_meta == "20 hours/week · Starting at $12\u2013$14/hr + tip"
     assert ranged_doc.admin_role_meta == "20 hours/week · $12\u201314/hour · Starting out"
     assert ranged_doc.hourly_pay_cents == 1200
 
@@ -1207,7 +1207,7 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
         assert equal_row.starting_out is False
         assert equal_row.hourly_pay_display == "starting at $14/hour"
         assert equal_row.hourly_pay_range_display == "$14/hour"
-        assert equal_row.role_meta == "40 hours/week · $14/hr + tip"
+        assert equal_row.role_meta == "40 hours/week · Starting at $14/hr + tip"
         assert equal_row.admin_role_meta == "40 hours/week · $14/hour"
         assert range_row.hourly_pay_cents == 1400
         assert range_row.hourly_pay_min_cents == 1400
@@ -1215,7 +1215,7 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
         assert range_row.starting_out is True
         assert range_row.hourly_pay_display == "starting at $14\u201316/hour"
         assert range_row.hourly_pay_range_display == "$14\u201316/hour"
-        assert range_row.role_meta == "40 hours/week · Starting out $14\u2013$16/hr + tip"
+        assert range_row.role_meta == "40 hours/week · Starting at $14\u2013$16/hr + tip"
         assert range_row.admin_role_meta == "40 hours/week · $14\u201316/hour · Starting out"
         legacy_row = Position(
             title="Legacy Cents Role",
@@ -1245,7 +1245,7 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
         assert tasting.description == TASTING_DESCRIPTION
         assert tasting.hourly_pay_display == "starting at $12\u201314/hour"
         assert tasting.hourly_pay_range_display == "$12\u201314/hour"
-        assert tasting.role_meta == "20 hours/week · Starting out $12\u2013$14/hr + tip"
+        assert tasting.role_meta == "20 hours/week · Starting at $12\u2013$14/hr + tip"
         assert tasting.admin_role_meta == "20 hours/week · $12\u201314/hour · Starting out"
         tasting_id = tasting.id
     finally:
@@ -1268,11 +1268,11 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
     assert saved.status_code in (302, 303)
 
     home = _client().get("/")
-    assert "40 hours/week · Starting out $14\u2013$16/hr + tip" in home.text
-    assert "20 hours/week · Starting out $12\u2013$14/hr + tip" in home.text
+    assert "40 hours/week · Starting at $14\u2013$16/hr + tip" in home.text
+    assert "20 hours/week · Starting at $12\u2013$14/hr + tip" in home.text
     equal_at = home.text.index("Equal Rate Role")
     equal_card = home.text[equal_at: home.text.index("</article>", equal_at)]
-    assert "40 hours/week · $14/hr + tip" in equal_card
+    assert "40 hours/week · Starting at $14/hr + tip" in equal_card
     assert "Starting out" not in equal_card
     assert "$14\u2013$14/hour" not in home.text
     assert "$14\u201314/hour" not in home.text
@@ -1280,17 +1280,17 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
     assert "$12\u2013$14/hour" not in home.text
     job = _client().get(f"/jobs/{range_row.id}")
     assert job.status_code == 200
-    assert "40 hours/week · Starting out $14\u2013$16/hr + tip" in job.text
+    assert "40 hours/week · Starting at $14\u2013$16/hr + tip" in job.text
     assert "$14\u2013$16/hour" not in job.text
     legacy_job = _client().get(f"/jobs/{legacy_id}")
     assert legacy_job.status_code == 200
     assert "Legacy Cents Role" in legacy_job.text
-    assert "40 hours/week · $14/hr + tip" in legacy_job.text
+    assert "40 hours/week · Starting at $14/hr + tip" in legacy_job.text
     assert "Starting out" not in legacy_job.text
     tasting_job = _client().get(f"/jobs/{tasting_id}")
     assert tasting_job.status_code == 200
     assert "<h1>Tasting</h1>" in tasting_job.text
-    assert "20 hours/week · Starting out $12\u2013$14/hr + tip" in tasting_job.text
+    assert "20 hours/week · Starting at $12\u2013$14/hr + tip" in tasting_job.text
     assert "$12\u2013$14/hour" not in tasting_job.text
     assert TASTING_DESCRIPTION in tasting_job.text
 
@@ -1398,3 +1398,44 @@ def test_home_links_css_with_cache_bust_version() -> None:
     r = _client().get("/")
     assert r.status_code == 200
     assert re.search(r'/static/app\.css\?v=\d+', r.text)
+
+
+def test_new_application_email_skipped_without_smtp_and_sent_with_it(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import notify
+
+    row = SimpleNamespace(
+        name="Pat Test", phone="555", hours_per_week="30", start_date="2026-10-05",
+        availability="Any", prior_counter="no", prior_where="", why_shop="Love it",
+    )
+    for key in ("SMTP_USER", "SMTP_PASSWORD"):
+        monkeypatch.delenv(key, raising=False)
+    assert notify.notify_new_application(row, "Barista", "pat@example.com") is False
+
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            sent["host"] = host
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def login(self, u, p):
+            sent["login"] = u
+
+        def send_message(self, msg):
+            sent["subject"] = msg["Subject"]
+            sent["to"] = msg["To"]
+
+    monkeypatch.setenv("SMTP_USER", "sender@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "pw")
+    monkeypatch.setenv("NOTIFY_EMAIL", "ronald@example.com")
+    monkeypatch.setattr(notify.smtplib, "SMTP_SSL", FakeSMTP)
+    assert notify.notify_new_application(row, "Barista", "pat@example.com") is True
+    assert sent["to"] == "ronald@example.com"
+    assert "Pat Test" in sent["subject"]

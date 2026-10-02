@@ -31,6 +31,7 @@ from app.models import (
     HourlyPayMixin,
     coerce_starting_out,
     normalize_description,
+    normalize_references,
     position_pay_writes,
     resolve_hourly_bounds,
 )
@@ -111,6 +112,8 @@ class CloudApplication:
         self.why_shop = data.get("why_shop") or ""
         self.hear_about = data.get("hear_about") or ""
         self.resume_path = data.get("resume_path") or ""
+        # Missing on older docs. Never required, and never used to contact anyone.
+        self.references = normalize_references(data.get("references"))
         self.status = data.get("status") or STATUS_SUBMITTED
         self.submitted_at = _naive_utc(data.get("submitted_at")) or datetime.now(
             timezone.utc
@@ -276,6 +279,9 @@ class CloudStore:
         if isinstance(submitted, datetime) and submitted.tzinfo is None:
             submitted = submitted.replace(tzinfo=timezone.utc)
         position_id = fields.get("position_id")
+        raw_refs = fields.get("references")
+        if raw_refs is None:
+            raw_refs = fields.get("references_json")
         payload = {
             "user_id": str(fields["user_id"]),
             "name": fields.get("name") or "",
@@ -294,6 +300,7 @@ class CloudStore:
             "why_shop": fields.get("why_shop") or "",
             "hear_about": fields.get("hear_about") or "",
             "resume_path": fields.get("resume_path") or "",
+            "references": [ref.as_dict() for ref in normalize_references(raw_refs)],
             "status": fields.get("status") or STATUS_SUBMITTED,
             "submitted_at": submitted,
             "reviewed_at": fields.get("reviewed_at"),

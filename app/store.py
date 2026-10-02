@@ -31,6 +31,7 @@ from app.models import (
     coerce_starting_out,
     normalize_description,
     position_pay_writes,
+    references_to_json,
 )
 
 ROOT = sqlite_db.ROOT
@@ -123,6 +124,10 @@ class SqliteStore:
     def create_application(self, **fields) -> Application:
         if fields.get("submitted_at") is None:
             fields["submitted_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+        raw_refs = fields.pop("references", None)
+        if "references_json" in fields:
+            raw_refs = fields["references_json"]
+        fields["references_json"] = references_to_json(raw_refs)
         app_row = Application(**fields)
         self.db.add(app_row)
         self.db.commit()

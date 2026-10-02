@@ -20,6 +20,10 @@ os.environ.pop("SESSION_HTTPS", None)
 os.environ["SESSION_SECRET"] = "test-secret-not-for-production"
 os.environ["ADMIN_EMAIL"] = "admin@test.local"
 os.environ["ADMIN_PASSWORD"] = "admin-test-password"
+os.environ.pop("ACK_EMAIL_ENABLED", None)
+os.environ.pop("SMTP_USER", None)
+os.environ.pop("SMTP_PASSWORD", None)
+os.environ.pop("NOTIFY_EMAIL", None)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -1439,3 +1443,452 @@ def test_new_application_email_skipped_without_smtp_and_sent_with_it(monkeypatch
     assert notify.notify_new_application(row, "Barista", "pat@example.com") is True
     assert sent["to"] == "ronald@example.com"
     assert "Pat Test" in sent["subject"]
+
+
+def _reference_blocks(html: str) -> list[str]:
+    parts = html.split('class="reference"')
+    return parts[1:]
+
+
+def test_apply_form_references_are_optional_and_unchecked() -> None:
+    client = _client()
+    _signup(client, "refform@example.com")
+    form = client.get("/apply")
+    assert form.status_code == 200
+    assert "References (optional)" in form.text
+    assert 'name="ref1_name"' in form.text
+    assert 'name="ref1_relationship"' in form.text
+    assert 'name="ref1_contact"' in form.text
+    assert 'name="ref2_name"' in form.text
+    assert 'name="ref2_contact"' in form.text
+    for which in ("ref1_ok_to_contact", "ref2_ok_to_contact"):
+        tag = form.text.split(f'name="{which}"', 1)[1].split(">", 1)[0]
+        assert "checked" not in tag
+    lowered = form.text.lower()
+    assert "birth" not in lowered
+    assert "graduation" not in lowered
+    assert "photo" not in lowered
+    assert lowered.count('type="file"') == 1
+    home = _client().get("/")
+    assert "Starting at $13/hr + tip" in home.text
+
+
+def test_application_submits_with_no_references() -> None:
+    client = _client()
+    _signup(client, "norefs@example.com")
+    created = client.post(
+        "/apply",
+        data=_apply_data(name="No Refs"),
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    assert "No Refs" in created.text
+    assert "None provided." in created.text
+    assert "This site does not contact references." in created.text
+    store = open_store()
+    try:
+        user = store.get_user_by_email("norefs@example.com")
+        assert user is not None
+        row = store.get_application_for_user(user.id)
+        assert row is not None
+        assert row.references == []
+        assert row.references_json == "[]"
+    finally:
+        store.close()
+
+
+def test_partial_reference_is_rejected_and_blank_checkbox_is_not() -> None:
+    partial = _client()
+    _signup(partial, "partialref@example.com")
+    rejected = partial.post(
+        "/apply",
+        data=_apply_data(ref1_name="Only a name"),
+        follow_redirects=False,
+    )
+    assert rejected.status_code in (302, 303)
+    assert rejected.headers["location"].endswith("/apply")
+    flashed = partial.get("/apply")
+    assert "leave it blank" in flashed.text
+    still = partial.get("/application", follow_redirects=False)
+    assert still.headers["location"].endswith("/apply")
+
+    only_box = _client()
+    _signup(only_box, "checkboxref@example.com")
+    created = only_box.post(
+        "/apply",
+        data=_apply_data(
+            name="Checkbox Only",
+            ref1_ok_to_contact="yes",
+            ref2_ok_to_contact="yes",
+        ),
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    assert "Checkbox Only" in created.text
+    assert "None provided." in created.text
+
+
+def test_references_stored_and_labelled_on_admin() -> None:
+    client = _client()
+    _signup(client, "withrefs@example.com")
+    created = client.post(
+        "/apply",
+        data=_apply_data(
+            name="With Refs",
+            ref1_name="Ada <b>Manager</b>",
+            ref1_relationship="Former manager",
+            ref1_contact="ada@example.com",
+            ref1_ok_to_contact="yes",
+            ref2_name="Ben Coworker",
+            ref2_relationship="Coworker",
+            ref2_contact="205-555-0198",
+        ),
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    assert "Ada &lt;b&gt;Manager&lt;/b&gt;" in created.text
+    assert "<b>Manager</b>" not in created.text
+    assert "ada@example.com" in created.text
+    assert "<dd>OK to contact</dd>" in created.text
+    assert "<dd>Not OK to contact</dd>" in created.text
+    blocks = _reference_blocks(created.text)
+    assert len(blocks) == 2
+    assert "Former manager" in blocks[0]
+    assert "<dd>OK to contact</dd>" in blocks[0]
+    assert "<dd>Not OK to contact</dd>" not in blocks[0]
+    assert "Ben Coworker" in blocks[1]
+    assert "205-555-0198" in blocks[1]
+    assert "<dd>Not OK to contact</dd>" in blocks[1]
+    assert "<dd>OK to contact</dd>" not in blocks[1]
+
+    store = open_store()
+    try:
+        user = store.get_user_by_email("withrefs@example.com")
+        assert user is not None
+        row = store.get_application_for_user(user.id)
+        assert row is not None
+        assert len(row.references) == 2
+        assert row.references[0].ok_to_contact is True
+        assert row.references[1].ok_to_contact is False
+        assert row.references[1].contact == "205-555-0198"
+        app_id = row.id
+    finally:
+        store.close()
+
+    admin = _admin_client()
+    page = admin.get("/admin")
+    assert page.status_code == 200
+    assert "With Refs" in page.text
+    assert "Ada &lt;b&gt;Manager&lt;/b&gt;" in page.text
+    assert "Former manager" in page.text
+    assert "ada@example.com" in page.text
+    assert "Ben Coworker" in page.text
+    assert "This site does not contact references." in page.text
+    admin_blocks = _reference_blocks(page.text)
+    ada = next(block for block in admin_blocks if "ada@example.com" in block)
+    ben = next(block for block in admin_blocks if "205-555-0198" in block)
+    assert "<dd>OK to contact</dd>" in ada
+    assert "<dd>Not OK to contact</dd>" in ben
+    marked = admin.post(
+        f"/admin/applications/{app_id}/review",
+        headers={"HX-Request": "true"},
+    )
+    assert marked.status_code == 200
+    assert "ada@example.com" in marked.text
+    assert "<dd>OK to contact</dd>" in marked.text
+    assert "<dd>Not OK to contact</dd>" in marked.text
+    assert "reviewed" in marked.text.lower()
+
+
+def test_second_reference_alone_is_stored() -> None:
+    client = _client()
+    _signup(client, "ref2only@example.com")
+    created = client.post(
+        "/apply",
+        data=_apply_data(
+            name="Second Only",
+            ref2_name="Casey Neighbor",
+            ref2_relationship="Neighbor",
+            ref2_contact="casey@example.com",
+            ref2_ok_to_contact="yes",
+        ),
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    assert "Casey Neighbor" in created.text
+    store = open_store()
+    try:
+        user = store.get_user_by_email("ref2only@example.com")
+        row = store.get_application_for_user(user.id)
+        assert row is not None
+        assert len(row.references) == 1
+        assert row.references[0].name == "Casey Neighbor"
+        assert row.references[0].ok_to_contact is True
+    finally:
+        store.close()
+
+
+def test_references_missing_on_old_rows_and_firestore_docs() -> None:
+    """New fields are optional. Older applications load with no references."""
+    from sqlalchemy import text
+
+    from app.cloud import CloudApplication
+    from app.db import engine
+    from app.models import APPLICATION_NEW_COLUMNS, normalize_references, references_to_json
+
+    assert any(name == "references_json" for name, _spec in APPLICATION_NEW_COLUMNS)
+    assert normalize_references(None) == []
+    assert normalize_references("") == []
+    assert normalize_references("not-json") == []
+    assert references_to_json(None) == "[]"
+
+    old_doc = CloudApplication(
+        "legacy-app",
+        {"user_id": "u1", "name": "Legacy", "phone": "205", "role": "Counter / Cashier"},
+    )
+    assert old_doc.references == []
+    assert old_doc.name == "Legacy"
+
+    written = [
+        ref.as_dict()
+        for ref in normalize_references(
+            [
+                {
+                    "name": "A",
+                    "relationship": "Boss",
+                    "contact": "a@b.co",
+                    "ok_to_contact": False,
+                    "birth_year": 1990,
+                    "graduation_year": 2012,
+                    "photo": "face.jpg",
+                },
+                {
+                    "name": "B",
+                    "relationship": "Pal",
+                    "phone": "205-555-0101",
+                    "ok_to_contact": "yes",
+                },
+                {
+                    "name": "C",
+                    "relationship": "Extra",
+                    "contact": "c@d.co",
+                    "ok_to_contact": True,
+                },
+            ]
+        )
+    ]
+    assert len(written) == 2
+    assert "birth_year" not in written[0]
+    assert "graduation_year" not in written[0]
+    assert "photo" not in written[0]
+    loaded = CloudApplication("new-app", {"name": "New", "references": written})
+    assert len(loaded.references) == 2
+    assert loaded.references[0].ok_to_contact is False
+    assert loaded.references[0].ok_to_contact_label == "Not OK to contact"
+    assert loaded.references[1].contact == "205-555-0101"
+    assert loaded.references[1].ok_to_contact is True
+    assert loaded.references[1].ok_to_contact_label == "OK to contact"
+
+    store = open_store()
+    try:
+        user = store.create_user("legacy-row@example.com", "not-a-real-hash")
+        bare = store.create_application(
+            user_id=user.id,
+            name="Legacy Row",
+            phone="205-555-0000",
+            availability="Days",
+        )
+        assert bare.references == []
+        assert bare.references_json == "[]"
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE applications SET references_json = '' WHERE id = :id"),
+                {"id": bare.id},
+            )
+        store.db.expire_all()
+        again = store.get_application(bare.id)
+        assert again is not None
+        assert again.references == []
+    finally:
+        store.close()
+
+
+class _RecordingSMTP:
+    sent: list = []
+
+    def __init__(self, host, port, timeout=None):
+        self.host = host
+        self.port = port
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def login(self, user, password):
+        return None
+
+    def send_message(self, msg):
+        type(self).sent.append(msg)
+
+
+class _BoomSMTP:
+    def __init__(self, host, port, timeout=None):
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def login(self, user, password):
+        raise OSError("smtp down")
+
+    def send_message(self, msg):
+        raise OSError("smtp down")
+
+
+def _ack_text(msg) -> str:
+    return f"{msg['Subject']}\n{msg.get_content()}"
+
+
+def test_ack_email_disabled_unless_flag_and_smtp(monkeypatch) -> None:
+    from app import notify
+
+    monkeypatch.delenv("ACK_EMAIL_ENABLED", raising=False)
+    monkeypatch.delenv("SMTP_USER", raising=False)
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+    assert notify.ack_email_enabled() is False
+    assert notify.notify_application_received("pat@example.com", "Pat", "Counter / Cashier") is False
+
+    monkeypatch.setenv("SMTP_USER", "sender@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "pw")
+    monkeypatch.setenv("ACK_EMAIL_ENABLED", "false")
+    assert notify.notify_application_received("pat@example.com", "Pat", "Counter / Cashier") is False
+    monkeypatch.setenv("ACK_EMAIL_ENABLED", "1")
+    assert notify.notify_application_received("pat@example.com", "Pat", "Counter / Cashier") is False
+
+    monkeypatch.setenv("ACK_EMAIL_ENABLED", "true")
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+    assert notify.notify_application_received("pat@example.com", "Pat", "Counter / Cashier") is False
+
+    sent: list = []
+
+    class CaptureSMTP(_RecordingSMTP):
+        def send_message(self, msg):
+            sent.append(msg)
+
+    monkeypatch.setenv("SMTP_PASSWORD", "pw")
+    monkeypatch.setattr(notify.smtplib, "SMTP_SSL", CaptureSMTP)
+    assert notify.notify_application_received("Pat@Example.com", "Pat Test", "Counter / Cashier") is True
+    assert len(sent) == 1
+    msg = sent[0]
+    assert msg["To"] == "Pat@Example.com"
+    assert "Sunshine's Bakery" in msg["From"]
+    text = _ack_text(msg)
+    assert "We received your application for Counter / Cashier" in text
+    assert "Sunshine's Bakery" in text
+    lowered = text.lower()
+    for banned in (
+        "age",
+        "18",
+        "birth",
+        "graduation",
+        "soon",
+        "shortly",
+        "within",
+        "asap",
+        "quickly",
+        "tomorrow",
+        "days",
+        "week",
+    ):
+        assert banned not in lowered
+    assert msg.get_content_type() == "text/plain"
+
+    def explode(*args, **kwargs):
+        raise OSError("smtp down")
+
+    monkeypatch.setattr(notify.smtplib, "SMTP_SSL", explode)
+    assert notify.notify_application_received("pat@example.com", "Pat", "Counter / Cashier") is False
+
+
+def test_apply_ack_email_does_not_break_submit_or_contact_references(monkeypatch) -> None:
+    from app import notify
+
+    sent: list = []
+
+    class CaptureSMTP(_RecordingSMTP):
+        def send_message(self, msg):
+            sent.append(msg)
+
+    monkeypatch.setenv("SMTP_USER", "sender@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "pw")
+    monkeypatch.setenv("NOTIFY_EMAIL", "ronald@example.com")
+    monkeypatch.delenv("ACK_EMAIL_ENABLED", raising=False)
+    monkeypatch.setattr(notify.smtplib, "SMTP_SSL", CaptureSMTP)
+
+    quiet = _client()
+    _signup(quiet, "noack@example.com")
+    quiet_apply = quiet.post(
+        "/apply",
+        data=_apply_data(
+            name="No Ack",
+            ref1_name="Ref Person",
+            ref1_relationship="Coworker",
+            ref1_contact="ref.person@example.com",
+            ref1_ok_to_contact="yes",
+        ),
+        follow_redirects=False,
+    )
+    assert quiet_apply.status_code in (302, 303)
+    assert quiet_apply.headers["location"].endswith("/application")
+    assert quiet.get("/application").status_code == 200
+    recipients = [msg["To"] for msg in sent]
+    assert "noack@example.com" not in recipients
+    assert "ref.person@example.com" not in recipients
+    assert recipients == ["ronald@example.com"]
+
+    sent.clear()
+    monkeypatch.setenv("ACK_EMAIL_ENABLED", "true")
+    applicant = _client()
+    _signup(applicant, "ackme@example.com")
+    applied = applicant.post(
+        "/apply",
+        data=_apply_data(
+            name="Ack Me",
+            ref1_name="Ref Person",
+            ref1_relationship="Coworker",
+            ref1_contact="ref.person@example.com",
+        ),
+        follow_redirects=False,
+    )
+    assert applied.status_code in (302, 303)
+    assert applied.headers["location"].endswith("/application")
+    page = applicant.get("/application")
+    assert page.status_code == 200
+    assert "Ack Me" in page.text
+    assert "<dd>Not OK to contact</dd>" in page.text
+    tos = [msg["To"] for msg in sent]
+    assert tos == ["ronald@example.com", "ackme@example.com"]
+    ack = sent[1]
+    assert "ref.person@example.com" not in _ack_text(ack)
+    assert "age" not in _ack_text(ack).lower()
+    assert "We received your application" in _ack_text(ack)
+
+    sent.clear()
+    monkeypatch.setattr(notify.smtplib, "SMTP_SSL", _BoomSMTP)
+    boom = _client()
+    _signup(boom, "ackboom@example.com")
+    survived = boom.post(
+        "/apply",
+        data=_apply_data(name="Ack Boom"),
+        follow_redirects=False,
+    )
+    assert survived.status_code in (302, 303)
+    assert survived.headers["location"].endswith("/application")
+    saved = boom.get("/application")
+    assert saved.status_code == 200
+    assert "Ack Boom" in saved.text

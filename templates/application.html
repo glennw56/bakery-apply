@@ -30,6 +30,9 @@
       <dt>Heard about us</dt>
       <dd>{{ application.hear_about_label }}</dd>
     </dl>
+    {% with refs=application.references %}
+      {% include "_references.html" %}
+    {% endwith %}
     {% if application.resume_path %}
       <p><a href="/application/resume">Download resume (PDF)</a></p>
     {% endif %}

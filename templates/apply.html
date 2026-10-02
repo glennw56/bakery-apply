@@ -82,6 +82,42 @@
         {% endfor %}
       </select>
     </label>
+    <fieldset class="references">
+      <legend>References (optional)</legend>
+      <p class="hint">Up to two. Leave blank if you don't have any. We never contact a reference unless you check OK to contact.</p>
+      <div class="reference-block">
+        <p class="hint">Reference 1</p>
+        <label>Name
+          <input type="text" name="ref1_name" maxlength="255" autocomplete="off">
+        </label>
+        <label>Relationship
+          <input type="text" name="ref1_relationship" maxlength="128" placeholder="Former manager or coworker">
+        </label>
+        <label>Phone or email
+          <input type="text" name="ref1_contact" maxlength="255" autocomplete="off">
+        </label>
+        <label class="check-row">
+          <input type="checkbox" name="ref1_ok_to_contact" value="yes">
+          OK to contact
+        </label>
+      </div>
+      <div class="reference-block">
+        <p class="hint">Reference 2</p>
+        <label>Name
+          <input type="text" name="ref2_name" maxlength="255" autocomplete="off">
+        </label>
+        <label>Relationship
+          <input type="text" name="ref2_relationship" maxlength="128" placeholder="Former manager or coworker">
+        </label>
+        <label>Phone or email
+          <input type="text" name="ref2_contact" maxlength="255" autocomplete="off">
+        </label>
+        <label class="check-row">
+          <input type="checkbox" name="ref2_ok_to_contact" value="yes">
+          OK to contact
+        </label>
+      </div>
+    </fieldset>
     <label>Resume (PDF, optional)
       <input type="file" name="resume" accept="application/pdf,.pdf">
     </label>

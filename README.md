@@ -10,7 +10,7 @@ Public job-apply site for **Sunshine's Bakery** (Irondale, AL). Openings live in
 
 **Not in git:** `.env`, the live sqlite file, resume PDFs, Square tokens / API keys (this app does not use Square), Google OAuth client secret. `data/*` is gitignored except `data/.gitkeep`. Copy `.env.example` to `.env` and set `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Google client id/secret and redirect URI: see `DEPLOY.md`.
 
-v1 does **not** email candidates. There is no public self-serve job posting — only the seeded admin can add, edit, close, or reopen positions on `/admin`. Open positions show hours/week and hourly pay (seeded Counter / Cashier is 40 hours/week and $13/hour). There is no second location, no public `/register-admin`, and no invented extra openings on startup (exactly one seed). An optional resume PDF can be uploaded on the apply form (`%PDF` magic, 5 MB max). `/docs`, `/redoc`, and `/openapi.json` are disabled (404).
+An applicant acknowledgement email is off unless `ACK_EMAIL_ENABLED=true` and `SMTP_USER` / `SMTP_PASSWORD` are set; otherwise applying still succeeds and no receipt is sent. The receipt does not mention age or a reply timeline, and the site never contacts references. There is no public self-serve job posting — only the seeded admin can add, edit, close, or reopen positions on `/admin`. Open positions show hours/week and hourly pay (seeded Counter / Cashier is 40 hours/week and $13/hour). There is no second location, no public `/register-admin`, and no invented extra openings on startup (exactly one seed). An optional resume PDF can be uploaded on the apply form (`%PDF` magic, 5 MB max). `/docs`, `/redoc`, and `/openapi.json` are disabled (404).
 
 ## Quick start
 
@@ -116,6 +116,12 @@ Or `make test`, or `PYTHONPATH=. .venv/bin/pytest -q`. Uses a throwaway sqlite f
 | `GOOGLE_CLIENT_SECRET` | OAuth web client secret. Secret Manager. Never commit |
 | `GOOGLE_REDIRECT_URI` | Callback URL. Default `https://bakery-apply-k6uuoen7wa-ue.a.run.app/auth/google/callback` |
 | `PUBLIC_BASE_URL` | Optional. If `GOOGLE_REDIRECT_URI` is unset, callback is `{PUBLIC_BASE_URL}/auth/google/callback` |
+| `SMTP_HOST` | SMTP server. Default `smtp.gmail.com` |
+| `SMTP_PORT` | SMTP SSL port. Default `465` |
+| `SMTP_USER` | From address and SMTP login. Required to send any mail |
+| `SMTP_PASSWORD` | SMTP password. Required to send any mail |
+| `NOTIFY_EMAIL` | Shop inbox for a new application. Defaults to `ADMIN_EMAIL` |
+| `ACK_EMAIL_ENABLED` | Set to `true` to email the applicant a short receipt after a successful application. Off by default. Also needs `SMTP_USER` and `SMTP_PASSWORD` |
 
 Cloud backend is used **only** when both `GCS_BUCKET` and `GOOGLE_CLOUD_PROJECT` (or `GCP_PROJECT`) are set. GCP client libraries are imported inside `CloudStore`, so a local pytest run never talks to GCP.
 

@@ -6,6 +6,7 @@ HTMX swaps the admin row when an application is marked reviewed.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from contextlib import asynccontextmanager
@@ -38,7 +39,7 @@ from app.auth import (
 )
 from app.backend import session_https_only
 from app.db import init_db
-from app.notify import notify_new_application
+from app.notify import notify_application_received, notify_new_application
 from app.google_oauth import (
     OAUTH_STATE_SESSION_KEY,
     GoogleOAuthError,
@@ -53,7 +54,11 @@ from app.google_oauth import (
 from app.models import (
     HEAR_ABOUT_CHOICES,
     HEAR_ABOUT_SLUGS,
+    MAX_REFERENCES,
     PROVIDER_GOOGLE,
+    REFERENCE_CONTACT_MAX,
+    REFERENCE_NAME_MAX,
+    REFERENCE_RELATIONSHIP_MAX,
     STATUS_SUBMITTED,
     YES_NO,
     normalize_description,
@@ -64,6 +69,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = ROOT / "templates"
 STATIC_DIR = ROOT / "static"
 CHICAGO = ZoneInfo("America/Chicago")
+
+log = logging.getLogger("bakery.apply")
 
 SHOP_NAME = "Sunshine's Bakery"
 SHOP_ADDRESS = "2231 1st Ave S, Irondale AL 35210"
@@ -557,6 +564,49 @@ def _yes_no(value: str | None) -> str:
     return (value or "").strip().lower()
 
 
+def _one_reference(
+    name: str,
+    relationship: str,
+    contact: str,
+    ok: str | None,
+) -> tuple[dict | None, str | None]:
+    """A blank slot is skipped. A partial slot is an error. OK to contact defaults off."""
+    name = (name or "").strip()
+    relationship = (relationship or "").strip()
+    contact = (contact or "").strip()
+    if not name and not relationship and not contact:
+        return None, None
+    if not name or not relationship or not contact:
+        return None, (
+            "Each reference needs a name, relationship, and phone or email — or leave it blank."
+        )
+    if (
+        len(name) > REFERENCE_NAME_MAX
+        or len(relationship) > REFERENCE_RELATIONSHIP_MAX
+        or len(contact) > REFERENCE_CONTACT_MAX
+    ):
+        return None, "A reference name, relationship, or phone or email is too long."
+    return {
+        "name": name,
+        "relationship": relationship,
+        "contact": contact,
+        "ok_to_contact": _is_open_value(ok),
+    }, None
+
+
+def _references_from_slots(
+    slots: list[tuple[str, str, str, str | None]],
+) -> tuple[list[dict], str | None]:
+    found: list[dict] = []
+    for name, relationship, contact, ok in slots[:MAX_REFERENCES]:
+        ref, error = _one_reference(name, relationship, contact, ok)
+        if error:
+            return [], error
+        if ref is not None:
+            found.append(ref)
+    return found, None
+
+
 def _optional_resume_bytes(upload: UploadFile | None) -> bytes | None:
     """Return PDF bytes, None if omitted, or raise ValueError if not a valid PDF."""
     if upload is None:
@@ -596,6 +646,14 @@ def apply_submit(
     prior_where: str = Form(""),
     why_shop: str = Form(""),
     hear_about: str = Form(""),
+    ref1_name: str = Form(""),
+    ref1_relationship: str = Form(""),
+    ref1_contact: str = Form(""),
+    ref1_ok_to_contact: str | None = Form(None),
+    ref2_name: str = Form(""),
+    ref2_relationship: str = Form(""),
+    ref2_contact: str = Form(""),
+    ref2_ok_to_contact: str | None = Form(None),
     resume: UploadFile | None = File(None),
     user=Depends(require_login),
     store=Depends(get_store),
@@ -636,6 +694,15 @@ def apply_submit(
         return _redirect("/apply")
     if prior_counter != "yes":
         prior_where = ""
+    references, ref_error = _references_from_slots(
+        [
+            (ref1_name, ref1_relationship, ref1_contact, ref1_ok_to_contact),
+            (ref2_name, ref2_relationship, ref2_contact, ref2_ok_to_contact),
+        ]
+    )
+    if ref_error:
+        _flash(request, ref_error)
+        return _redirect("/apply")
     position = store.get_position(position_id)
     if position is None or not position.open:
         _flash(request, "Pick an open position.")
@@ -662,12 +729,17 @@ def apply_submit(
         prior_where=prior_where,
         why_shop=why_shop,
         hear_about=hear_about,
+        references=references,
         status=STATUS_SUBMITTED,
         submitted_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     if resume_bytes:
         store.save_resume(app_row, resume_bytes)
     notify_new_application(app_row, position.title, user.email)
+    try:
+        notify_application_received(user.email, name, position.title)
+    except Exception:  # noqa: BLE001 - a receipt must never block the application
+        log.exception("Application acknowledgement email failed")
     return _redirect("/application")
 
 

@@ -388,6 +388,27 @@ fieldset.yn legend {
   color: var(--ink);
 }
 .check-row input[type="checkbox"] { width: auto; padding: 0; }
+fieldset.references {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin: 0;
+  padding: 0.85rem 0.95rem 1rem;
+  display: grid;
+  gap: 0.7rem;
+}
+fieldset.references legend {
+  font-family: Fraunces, "Times New Roman", serif;
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 1.05rem;
+  padding: 0 0.3rem;
+}
+fieldset.references .hint { margin: 0; }
+.reference-block { display: grid; gap: 0.7rem; }
+.reference-block + .reference-block {
+  border-top: 1px solid var(--line);
+  padding-top: 0.7rem;
+}
 
 .site-footer {
   padding: 0.85rem 1.35rem 1.15rem;

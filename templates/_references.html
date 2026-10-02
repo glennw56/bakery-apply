@@ -1,0 +1,20 @@
+<h2>References</h2>
+<p class="hint">Read only. This site does not contact references.</p>
+{% if refs %}
+  {% for ref in refs %}
+    <div class="reference">
+      <dl class="dl">
+        <dt>Name</dt>
+        <dd>{{ ref.name }}</dd>
+        <dt>Relationship</dt>
+        <dd>{{ ref.relationship }}</dd>
+        <dt>Phone or email</dt>
+        <dd>{{ ref.contact }}</dd>
+        <dt>OK to contact</dt>
+        <dd>{{ ref.ok_to_contact_label }}</dd>
+      </dl>
+    </div>
+  {% endfor %}
+{% else %}
+  <p>None provided.</p>
+{% endif %}

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -49,7 +51,14 @@ APPLICATION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("hear_about", "VARCHAR(32) DEFAULT '' NOT NULL"),
     ("resume_path", "VARCHAR(255) DEFAULT '' NOT NULL"),
     ("position_id", "INTEGER"),
+    # JSON list of up to 2 references. Missing on older rows means none.
+    ("references_json", "TEXT DEFAULT '[]' NOT NULL"),
 )
+
+MAX_REFERENCES = 2
+REFERENCE_NAME_MAX = 255
+REFERENCE_RELATIONSHIP_MAX = 128
+REFERENCE_CONTACT_MAX = 255
 
 PROVIDER_PASSWORD = "password"
 PROVIDER_GOOGLE = "google"
@@ -169,6 +178,104 @@ def resolve_hourly_bounds(
         lo = int(min_cents)
     hi = lo if max_cents is None else int(max_cents)
     return lo, hi
+
+
+@dataclass(frozen=True)
+class Reference:
+    """One optional reference. The site stores this and never contacts them."""
+
+    name: str
+    relationship: str
+    contact: str
+    ok_to_contact: bool = False
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "relationship": self.relationship,
+            "contact": self.contact,
+            "ok_to_contact": bool(self.ok_to_contact),
+        }
+
+    @property
+    def ok_to_contact_label(self) -> str:
+        if self.ok_to_contact:
+            return "OK to contact"
+        return "Not OK to contact"
+
+
+def coerce_ok_to_contact(value) -> bool:
+    """Checkbox / stored flag. Missing or unchecked means do not contact."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "on", "yes"}
+
+
+def _clip(value, limit: int) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def normalize_references(raw) -> list[Reference]:
+    """Up to 2 references. Missing, blank, or unreadable values become [].
+
+    Older applications have no reference field. A reference with no name,
+    relationship, or contact is dropped. Extra keys (anything that could stand
+    in for age) are ignored.
+    """
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    if isinstance(raw, Reference):
+        raw = [raw]
+    elif isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    found: list[Reference] = []
+    for item in raw:
+        if len(found) >= MAX_REFERENCES:
+            break
+        if isinstance(item, Reference):
+            name = _clip(item.name, REFERENCE_NAME_MAX)
+            relationship = _clip(item.relationship, REFERENCE_RELATIONSHIP_MAX)
+            contact = _clip(item.contact, REFERENCE_CONTACT_MAX)
+            ok = bool(item.ok_to_contact)
+        elif isinstance(item, dict):
+            name = _clip(item.get("name"), REFERENCE_NAME_MAX)
+            relationship = _clip(item.get("relationship"), REFERENCE_RELATIONSHIP_MAX)
+            contact = _clip(
+                item.get("contact") or item.get("phone") or item.get("email"),
+                REFERENCE_CONTACT_MAX,
+            )
+            ok = coerce_ok_to_contact(item.get("ok_to_contact"))
+        else:
+            continue
+        if not name and not relationship and not contact:
+            continue
+        found.append(
+            Reference(
+                name=name,
+                relationship=relationship,
+                contact=contact,
+                ok_to_contact=ok,
+            )
+        )
+    return found
+
+
+def references_to_json(raw) -> str:
+    return json.dumps(
+        [ref.as_dict() for ref in normalize_references(raw)],
+        separators=(",", ":"),
+    )
 
 
 def coerce_starting_out(value) -> bool:
@@ -339,6 +446,10 @@ class Application(Base):
     why_shop: Mapped[str] = mapped_column(Text, nullable=False, default="")
     hear_about: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     resume_path: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    # JSON text so an older SQLite file can gain the column with DEFAULT '[]'.
+    references_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default=text("'[]'")
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=STATUS_SUBMITTED)
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
@@ -350,3 +461,7 @@ class Application(Base):
     @property
     def hear_about_label(self) -> str:
         return HEAR_ABOUT_LABELS.get(self.hear_about, self.hear_about or "")
+
+    @property
+    def references(self) -> list[Reference]:
+        return normalize_references(getattr(self, "references_json", None))

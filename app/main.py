@@ -471,7 +471,7 @@ def google_callback(
     state: str | None = None,
     error: str | None = None,
 ):
-    """Exchange the code, require a verified email, then open an applicant session."""
+    """Exchange the code, require a verified email, then open an admin or applicant session."""
     expected = request.session.pop(OAUTH_STATE_SESSION_KEY, None)
     if not oauth_states_match(expected, state):
         _flash(request, "Google sign-in could not be confirmed. Try again.")
@@ -496,6 +496,12 @@ def google_callback(
     if not google_sub or len(google_sub) > 255:
         _flash(request, "Google did not return a usable account id.")
         return _redirect("/login")
+    admin_email = normalize_email(os.environ.get("ADMIN_EMAIL") or "")
+    if admin_email and email_n == admin_email:
+        admin = store.get_user_by_email(email_n)
+        if admin is not None and admin.is_admin:
+            login_user(request, admin)
+            return _after_login(request, store, admin)
     user, problem = _applicant_from_google(store, email_n, google_sub)
     if problem or user is None:
         _flash(request, problem or "Google sign-in did not complete. Try again.")

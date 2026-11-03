@@ -871,15 +871,28 @@ def test_google_links_existing_password_applicant(monkeypatch) -> None:
     assert logged.headers["location"].endswith("/apply")
 
 
-def test_google_callback_does_not_sign_in_admin(monkeypatch) -> None:
+def test_google_callback_signs_in_verified_admin(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_EMAIL", "  Admin@Test.Local ")
+    _patch_google(
+        monkeypatch,
+        {"sub": "admin-sub", "email": "ADMIN@test.local", "email_verified": True},
+    )
+    client = _client()
+    response = client.get(
+        f"/auth/google/callback?code=good-code&state={_google_state(client)}",
+        follow_redirects=False,
+    )
+    assert response.headers["location"].endswith("/admin")
+    admin_page = client.get("/admin", follow_redirects=False)
+    assert admin_page.status_code == 200
+
+
+def test_google_callback_refuses_unverified_admin(monkeypatch) -> None:
     _google_env(monkeypatch)
     _patch_google(
         monkeypatch,
-        {
-            "sub": "admin-sub",
-            "email": "admin@test.local",
-            "email_verified": True,
-        },
+        {"sub": "admin-sub", "email": "admin@test.local", "email_verified": False},
     )
     client = _client()
     response = client.get(
@@ -887,19 +900,32 @@ def test_google_callback_does_not_sign_in_admin(monkeypatch) -> None:
         follow_redirects=False,
     )
     assert response.headers["location"].endswith("/login")
-    page = client.get("/login")
-    assert "Admin accounts sign in with email and password." in page.text
     admin_try = client.get("/admin", follow_redirects=False)
     assert admin_try.status_code in (302, 303)
     assert "/login" in admin_try.headers["location"]
-    store = open_store()
-    try:
-        admin = store.get_user_by_email("admin@test.local")
-        assert admin is not None and admin.is_admin
-        assert not admin.google_sub
-        assert store.get_user_by_google_sub("admin-sub") is None
-    finally:
-        store.close()
+
+
+def test_google_other_email_is_applicant_and_admin_password_works(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    _patch_google(
+        monkeypatch,
+        {"sub": "someone-sub", "email": "someone@example.com", "email_verified": True},
+    )
+    client = _client()
+    response = client.get(
+        f"/auth/google/callback?code=good-code&state={_google_state(client)}",
+        follow_redirects=False,
+    )
+    assert not response.headers["location"].endswith("/admin")
+    admin_try = client.get("/admin", follow_redirects=False)
+    assert admin_try.status_code in (302, 303, 403)
+    client.post("/logout")
+    logged = client.post(
+        "/login",
+        data={"email": "admin@test.local", "password": os.environ["ADMIN_PASSWORD"]},
+        follow_redirects=False,
+    )
+    assert logged.headers["location"].endswith("/admin")
 
 
 def test_jobs_are_clickable_and_login_frames_applying() -> None:

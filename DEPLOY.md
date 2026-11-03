@@ -2,7 +2,7 @@
 
 Same Cloud Run service: **`bakery-apply`** in GCP project **`bakery-444323`**. Do not create a new service, and do not deploy from this change until Shop Tech reviews it.
 
-Applicant Google sign-in is the OAuth 2.0 authorization-code flow. Admin stays on email + password (`ADMIN_EMAIL` / `ADMIN_PASSWORD`). Google login refuses `is_admin` accounts.
+Applicant Google sign-in is the OAuth 2.0 authorization-code flow. Admin can use Sign in with Google when Google returns a verified email equal to `ADMIN_EMAIL` (case-insensitive); email + password (`ADMIN_EMAIL` / `ADMIN_PASSWORD`) still works as a fallback. Other Google accounts never get admin.
 
 ## Exact redirect URI
 

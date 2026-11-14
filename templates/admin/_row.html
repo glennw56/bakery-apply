@@ -43,6 +43,7 @@
       hx-target="#app-{{ item.id }}"
       hx-swap="outerHTML"
     >
+      <input type="hidden" name="job" value="{{ job_filter or '' }}">
       <button type="submit">Mark reviewed</button>
     </form>
   {% endif %}

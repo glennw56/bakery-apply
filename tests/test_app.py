@@ -283,7 +283,7 @@ def test_no_wage_text_on_pages() -> None:
         "/login",
         data={"email": "admin@test.local", "password": "admin-test-password"},
     )
-    pages.append(admin.get("/admin"))
+    pages.append(admin.get("/admin?tab=jobs"))
 
     home = pages[0]
     assert home.status_code == 200
@@ -346,7 +346,7 @@ def test_admin_post_open_job_shows_on_home() -> None:
         follow_redirects=False,
     )
     assert logged.status_code in (302, 303)
-    page = admin.get("/admin")
+    page = admin.get("/admin?tab=jobs")
     assert page.status_code == 200
     assert "Add a position" in page.text
     assert "Counter / Cashier" in page.text
@@ -363,7 +363,7 @@ def test_admin_post_open_job_shows_on_home() -> None:
         follow_redirects=False,
     )
     assert created.status_code in (302, 303)
-    assert created.headers["location"].endswith("/admin")
+    assert created.headers["location"].endswith("/admin?tab=jobs")
     home = _client().get("/")
     assert home.status_code == 200
     assert "Pastry Cook" in home.text
@@ -1336,7 +1336,7 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
     assert "Starting out" not in closed_baker.role_meta
 
     admin = _admin_client()
-    page = admin.get("/admin")
+    page = admin.get("/admin?tab=jobs")
     assert "Pay from (dollars)" in page.text
     assert "Pay to (dollars)" in page.text
     assert 'name="starting_out"' in page.text
@@ -1485,7 +1485,7 @@ def test_pay_range_display_admin_create_and_legacy_cents() -> None:
     assert "$12\u2013$14/hour" not in tasting_job.text
     assert TASTING_DESCRIPTION in tasting_job.text
 
-    summary = admin.get("/admin")
+    summary = admin.get("/admin?tab=jobs")
     assert "40 hours/week · $14/hour" in summary.text
     assert "40 hours/week · $14\u201316/hour · Starting out" in summary.text
     assert "20 hours/week · $12\u201314/hour · Starting out" in summary.text
@@ -1571,7 +1571,7 @@ def test_public_job_description_keeps_line_breaks_and_escapes_html() -> None:
     assert job.status_code == 200
     assert_preserved(job.text)
 
-    admin_page = admin.get("/admin")
+    admin_page = admin.get("/admin?tab=jobs")
     assert admin_page.status_code == 200
     assert_preserved(admin_page.text)
     textarea = re.search(
@@ -2079,3 +2079,125 @@ def test_apply_ack_email_does_not_break_submit_or_contact_references(monkeypatch
     saved = boom.get("/application")
     assert saved.status_code == 200
     assert "Ack Boom" in saved.text
+
+
+# --- Admin tabs + job filter ---------------------------------------------------
+
+
+def _seed_filter_data() -> dict:
+    """Two fake jobs (one closed) and three fake applications, one with no job."""
+    from app.auth import hash_password
+
+    store = open_store()
+    try:
+        existing = {p.title: p for p in store.list_positions()}
+        open_job = existing.get("Filter Open Job") or store.create_position(
+            title="Filter Open Job", hours_per_week=20,
+            hourly_pay_min_cents=1300, hourly_pay_max_cents=1500, open=True,
+        )
+        closed_job = existing.get("Filter Closed Job") or store.create_position(
+            title="Filter Closed Job", hours_per_week=10,
+            hourly_pay_min_cents=1200, hourly_pay_max_cents=1200, open=False,
+        )
+        people = (
+            ("filter.open@example.com", "Olive Openjob", open_job.id, open_job.title),
+            ("filter.closed@example.com", "Cass Closedjob", closed_job.id, closed_job.title),
+            ("filter.nojob@example.com", "Nora Nojob", None, "Counter / Cashier"),
+        )
+        for email, name, pos_id, role in people:
+            user = store.get_user_by_email(email) or store.create_user(
+                email, hash_password("secret123")
+            )
+            if store.get_application_for_user(user.id) is None:
+                store.create_application(
+                    user_id=user.id, name=name, phone="205-555-0111",
+                    availability="Mornings", role=role, position_id=pos_id,
+                    why_shop=WHY_SHOP,
+                )
+        return {"open": str(open_job.id), "closed": str(closed_job.id)}
+    finally:
+        store.close()
+
+
+def test_admin_tabs_split_applications_and_jobs() -> None:
+    _seed_filter_data()
+    admin = _admin_client()
+    default = admin.get("/admin")
+    assert default.status_code == 200
+    assert 'data-tab="applications"' in default.text
+    assert 'data-tab="jobs"' not in default.text
+    assert "Add a position" not in default.text
+    assert "Olive Openjob" in default.text
+    assert 'href="/admin?tab=jobs"' in default.text
+    assert 'aria-current="page"' in default.text
+
+    jobs = admin.get("/admin?tab=jobs")
+    assert jobs.status_code == 200
+    assert 'data-tab="jobs"' in jobs.text
+    assert "Add a position" in jobs.text
+    assert "Filter Closed Job" in jobs.text
+    assert "Olive Openjob" not in jobs.text
+
+    bogus = admin.get("/admin?tab=nope")
+    assert 'data-tab="applications"' in bogus.text
+    # Old URL still works.
+    assert admin.get("/admin/positions", follow_redirects=False).headers["location"].endswith(
+        "/admin?tab=jobs"
+    )
+
+
+def test_admin_job_filter_shows_only_that_job() -> None:
+    ids = _seed_filter_data()
+    admin = _admin_client()
+    all_page = admin.get("/admin?tab=applications")
+    for name in ("Olive Openjob", "Cass Closedjob", "Nora Nojob"):
+        assert name in all_page.text
+    assert re.search(r"All jobs \(\d+\)", all_page.text)
+    assert re.search(r"Filter Open Job \(1\)", all_page.text)
+    assert re.search(r"Filter Closed Job \(closed\) \(1\)", all_page.text)
+
+    only_open = admin.get(f"/admin?tab=applications&job={ids['open']}")
+    assert "Olive Openjob" in only_open.text
+    assert "Cass Closedjob" not in only_open.text
+    assert "Nora Nojob" not in only_open.text
+    assert "Showing 1 of" in only_open.text
+    assert f'<option value="{ids["open"]}" selected>' in only_open.text
+    assert 'name="job" value="' + ids["open"] + '"' in only_open.text
+
+    only_closed = admin.get(f"/admin?job={ids['closed']}")
+    assert "Cass Closedjob" in only_closed.text
+    assert "Olive Openjob" not in only_closed.text
+
+    unknown = admin.get("/admin?job=999999")
+    assert "Nora Nojob" in unknown.text
+
+
+def test_admin_review_keeps_job_filter() -> None:
+    ids = _seed_filter_data()
+    store = open_store()
+    try:
+        user = store.get_user_by_email("filter.open@example.com")
+        app_id = store.get_application_for_user(user.id).id
+    finally:
+        store.close()
+    admin = _admin_client()
+    response = admin.post(
+        f"/admin/applications/{app_id}/review",
+        data={"job": ids["open"]},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"].endswith(f"/admin?tab=applications&job={ids['open']}")
+
+
+def test_admin_tabs_and_filter_admin_only(monkeypatch) -> None:
+    ids = _seed_filter_data()
+    anon = _client()
+    for url in ("/admin?tab=jobs", f"/admin?tab=applications&job={ids['open']}"):
+        r = anon.get(url, follow_redirects=False)
+        assert r.status_code in (302, 303)
+        assert r.headers["location"].endswith("/login")
+    applicant = _client()
+    _signup(applicant, "filter.notadmin@example.com")
+    for url in ("/admin?tab=jobs", f"/admin?job={ids['open']}"):
+        assert applicant.get(url, follow_redirects=False).status_code == 403

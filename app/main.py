@@ -803,22 +803,73 @@ def application_resume(
 # --- Admin: seeded from env, not public self-serve ----------------------------
 
 
+ADMIN_TAB_APPLICATIONS = "applications"
+ADMIN_TAB_JOBS = "jobs"
+ADMIN_TABS = (ADMIN_TAB_APPLICATIONS, ADMIN_TAB_JOBS)
+
+
+def _admin_url(tab: str = ADMIN_TAB_APPLICATIONS, job: str = "") -> str:
+    """Build a linkable admin URL. Unknown tabs fall back to Applications."""
+    from urllib.parse import urlencode
+
+    if tab not in ADMIN_TABS:
+        tab = ADMIN_TAB_APPLICATIONS
+    params = {"tab": tab}
+    job = (job or "").strip()
+    if tab == ADMIN_TAB_APPLICATIONS and job:
+        params["job"] = job
+    return "/admin?" + urlencode(params)
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_list(
     request: Request,
+    tab: str = ADMIN_TAB_APPLICATIONS,
+    job: str = "",
     admin=Depends(require_admin),
     store=Depends(get_store),
 ):
-    rows = store.list_applications()
-    for row in rows:
-        _attach_applicant_email(store, row)
+    tab = (tab or "").strip().lower()
+    if tab not in ADMIN_TABS:
+        tab = ADMIN_TAB_APPLICATIONS
     positions = store.list_positions()
+    all_rows = store.list_applications()
+    counts: dict[str, int] = {}
+    for row in all_rows:
+        key = str(row.position_id) if row.position_id not in (None, "") else ""
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    job = (job or "").strip()
+    known = {str(p.id) for p in positions}
+    if job and job not in known:
+        job = ""
+    if job:
+        rows = [r for r in all_rows if str(r.position_id or "") == job]
+    else:
+        rows = all_rows
+    if tab == ADMIN_TAB_APPLICATIONS:
+        for row in rows:
+            _attach_applicant_email(store, row)
+    job_filters = [
+        {
+            "id": str(p.id),
+            "title": p.title,
+            "open": bool(p.open),
+            "count": counts.get(str(p.id), 0),
+        }
+        for p in positions
+    ]
     return render(
         request,
         "admin/index.html",
         admin,
+        tab=tab,
         applications=rows,
         positions=positions,
+        job_filter=job,
+        job_filters=job_filters,
+        total_count=len(all_rows),
+        shown_count=len(rows),
     )
 
 
@@ -826,20 +877,22 @@ def admin_list(
 def admin_mark_reviewed(
     app_id: str,
     request: Request,
+    job: str = Form(""),
     admin=Depends(require_admin),
     store=Depends(get_store),
 ):
+    back = _admin_url(ADMIN_TAB_APPLICATIONS, job)
     row = store.get_application(app_id)
     if row is None:
         if _is_htmx(request):
             return HTMLResponse("", status_code=404)
         _flash(request, "Application not found.")
-        return _redirect("/admin")
+        return _redirect(back)
     row = store.mark_reviewed(row)
     if _is_htmx(request):
         _attach_applicant_email(store, row)
-        return render(request, "admin/_row.html", admin, item=row)
-    return _redirect("/admin")
+        return render(request, "admin/_row.html", admin, item=row, job_filter=job)
+    return _redirect(back)
 
 
 @app.get("/admin/applications/{app_id}/resume")
@@ -861,7 +914,7 @@ def admin_download_resume(
 @app.get("/admin/positions")
 def admin_positions_redirect(admin=Depends(require_admin)):
     _ = admin
-    return _redirect("/admin")
+    return _redirect(_admin_url(ADMIN_TAB_JOBS))
 
 
 @app.post("/admin/positions")
@@ -889,10 +942,10 @@ def admin_create_position(
     )
     if error or fields is None:
         _flash(request, error or "Title, hours/week, pay from, and pay to (dollars) are required.")
-        return _redirect("/admin")
+        return _redirect(_admin_url(ADMIN_TAB_JOBS))
     store.create_position(**fields)
     _flash(request, "Position added.")
-    return _redirect("/admin")
+    return _redirect(_admin_url(ADMIN_TAB_JOBS))
 
 
 @app.post("/admin/positions/{pos_id}")
@@ -914,16 +967,16 @@ def admin_update_position(
     row = store.get_position(pos_id)
     if row is None:
         _flash(request, "Position not found.")
-        return _redirect("/admin")
+        return _redirect(_admin_url(ADMIN_TAB_JOBS))
     action = (action or "").strip().lower()
     if action == "close":
         store.update_position(row, open=False)
         _flash(request, "Position closed. It is hidden from the public hiring page.")
-        return _redirect("/admin")
+        return _redirect(_admin_url(ADMIN_TAB_JOBS))
     if action == "reopen":
         store.update_position(row, open=True)
         _flash(request, "Position reopened.")
-        return _redirect("/admin")
+        return _redirect(_admin_url(ADMIN_TAB_JOBS))
     fields, error = _position_fields_from_form(
         title,
         hours_per_week,
@@ -935,7 +988,7 @@ def admin_update_position(
     )
     if error or fields is None:
         _flash(request, error or "Title, hours/week, pay from, and pay to (dollars) are required.")
-        return _redirect("/admin")
+        return _redirect(_admin_url(ADMIN_TAB_JOBS))
     store.update_position(row, **fields)
     _flash(request, "Position saved.")
-    return _redirect("/admin")
+    return _redirect(_admin_url(ADMIN_TAB_JOBS))

@@ -1,4 +1,4 @@
-"""Google OAuth 2.0 authorization-code flow for applicant sign-in.
+"""Google OAuth 2.0 authorization-code flow for applicant and admin sign-in.
 
 Start stores a random `state` in the session and sends the browser to Google.
 The callback checks that state (CSRF), exchanges the code, and reads the

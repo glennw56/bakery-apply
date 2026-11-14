@@ -928,6 +928,167 @@ def test_google_other_email_is_applicant_and_admin_password_works(monkeypatch) -
     assert logged.headers["location"].endswith("/admin")
 
 
+def _make_admin(email: str, google_sub: str | None = None):
+    from app.auth import UNUSABLE_PASSWORD_HASH
+
+    store = open_store()
+    try:
+        existing = store.get_user_by_email(email)
+        if existing is not None:
+            return existing.id
+        user = store.create_user(
+            email,
+            UNUSABLE_PASSWORD_HASH,
+            is_admin=True,
+            google_sub=google_sub,
+            provider="google",
+        )
+        return user.id
+    finally:
+        store.close()
+
+
+def _google_callback(client: TestClient):
+    return client.get(
+        f"/auth/google/callback?code=good-code&state={_google_state(client)}",
+        follow_redirects=False,
+    )
+
+
+def test_google_second_admin_signs_in_and_links_sub(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    admin_id = _make_admin("second.admin@example.com")
+    _patch_google(
+        monkeypatch,
+        {"sub": "second-admin-sub", "email": "  Second.Admin@Example.com ", "email_verified": True},
+    )
+    client = _client()
+    response = _google_callback(client)
+    assert response.headers["location"].endswith("/admin")
+    assert client.get("/admin", follow_redirects=False).status_code == 200
+    store = open_store()
+    try:
+        user = store.get_user_by_email("second.admin@example.com")
+        assert user.id == admin_id
+        assert user.is_admin is True
+        assert user.google_sub == "second-admin-sub"
+    finally:
+        store.close()
+    client.post("/logout")
+    again = _google_callback(client)
+    assert again.headers["location"].endswith("/admin")
+
+
+def test_google_admin_unverified_refused(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    _make_admin("unverified.admin@example.com")
+    _patch_google(
+        monkeypatch,
+        {"sub": "uv-admin-sub", "email": "unverified.admin@example.com", "email_verified": False},
+    )
+    client = _client()
+    response = _google_callback(client)
+    assert response.headers["location"].endswith("/login")
+    assert client.get("/admin", follow_redirects=False).status_code in (302, 303)
+    store = open_store()
+    try:
+        assert store.get_user_by_email("unverified.admin@example.com").google_sub is None
+    finally:
+        store.close()
+
+
+def test_google_admin_with_different_linked_sub_refused(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    _make_admin("linked.admin@example.com", google_sub="original-admin-sub")
+    _patch_google(
+        monkeypatch,
+        {"sub": "intruder-sub", "email": "linked.admin@example.com", "email_verified": True},
+    )
+    client = _client()
+    response = _google_callback(client)
+    assert response.headers["location"].endswith("/login")
+    assert "different Google account" in client.get("/login").text
+    assert client.get("/admin", follow_redirects=False).status_code in (302, 303)
+    store = open_store()
+    try:
+        user = store.get_user_by_email("linked.admin@example.com")
+        assert user.google_sub == "original-admin-sub"
+        assert store.get_user_by_google_sub("intruder-sub") is None
+    finally:
+        store.close()
+
+
+def test_google_admin_sub_with_new_email_refused(monkeypatch) -> None:
+    """An admin's Google account reporting a different email never gets admin or a new account."""
+    _google_env(monkeypatch)
+    _make_admin("moved.admin@example.com", google_sub="moved-admin-sub")
+    _patch_google(
+        monkeypatch,
+        {"sub": "moved-admin-sub", "email": "moved.new@example.com", "email_verified": True},
+    )
+    client = _client()
+    response = _google_callback(client)
+    assert response.headers["location"].endswith("/login")
+    store = open_store()
+    try:
+        assert store.get_user_by_email("moved.new@example.com") is None
+    finally:
+        store.close()
+
+
+def test_google_non_admin_is_applicant_and_never_admin(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    _patch_google(
+        monkeypatch,
+        {"sub": "plain-sub", "email": "plain.applicant@example.com", "email_verified": True},
+    )
+    client = _client()
+    response = _google_callback(client)
+    assert response.headers["location"].endswith("/apply")
+    assert client.get("/admin", follow_redirects=False).status_code == 403
+    store = open_store()
+    try:
+        user = store.get_user_by_email("plain.applicant@example.com")
+        assert user is not None
+        assert user.is_admin is False
+        assert user.provider == "google"
+    finally:
+        store.close()
+
+
+def test_google_start_always_shows_account_picker(monkeypatch) -> None:
+    from urllib.parse import parse_qs, urlparse
+
+    _google_env(monkeypatch)
+    client = _client()
+    query = parse_qs(urlparse(_google_start(client).headers["location"]).query)
+    assert query["prompt"] == ["select_account"]
+
+
+def test_google_admin_link_keeps_password_login(monkeypatch) -> None:
+    _google_env(monkeypatch)
+    _patch_google(
+        monkeypatch,
+        {"sub": "admin-sub", "email": "admin@test.local", "email_verified": True},
+    )
+    client = _client()
+    assert _google_callback(client).headers["location"].endswith("/admin")
+    client.post("/logout")
+    logged = client.post(
+        "/login",
+        data={"email": "admin@test.local", "password": os.environ["ADMIN_PASSWORD"]},
+        follow_redirects=False,
+    )
+    assert logged.headers["location"].endswith("/admin")
+    store = open_store()
+    try:
+        admin = store.get_user_by_email("admin@test.local")
+        assert admin.google_sub == "admin-sub"
+        assert admin.password_hash.startswith("$2")
+    finally:
+        store.close()
+
+
 def test_jobs_are_clickable_and_login_frames_applying() -> None:
     client = _client()
     pos_id = _open_position_id()

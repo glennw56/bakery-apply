@@ -496,12 +496,14 @@ def google_callback(
     if not google_sub or len(google_sub) > 255:
         _flash(request, "Google did not return a usable account id.")
         return _redirect("/login")
-    admin_email = normalize_email(os.environ.get("ADMIN_EMAIL") or "")
-    if admin_email and email_n == admin_email:
-        admin = store.get_user_by_email(email_n)
-        if admin is not None and admin.is_admin:
-            login_user(request, admin)
-            return _after_login(request, store, admin)
+    existing = store.get_user_by_email(email_n)
+    if existing is not None and existing.is_admin:
+        admin, problem = _admin_from_google(store, existing, google_sub)
+        if problem or admin is None:
+            _flash(request, problem or "Google sign-in did not complete. Try again.")
+            return _redirect("/login")
+        login_user(request, admin)
+        return _after_login(request, store, admin)
     user, problem = _applicant_from_google(store, email_n, google_sub)
     if problem or user is None:
         _flash(request, problem or "Google sign-in did not complete. Try again.")
@@ -510,17 +512,36 @@ def google_callback(
     return _after_login(request, store, user)
 
 
+def _admin_from_google(store, admin, google_sub: str):
+    """Sign in an existing is_admin user whose verified Google email matches.
+
+    is_admin is only ever read here, never set: admin stays a flag set in the
+    database. The first Google sign-in links google_sub; after that only the
+    same Google account is accepted.
+    """
+    if admin.google_sub:
+        if admin.google_sub != google_sub:
+            return None, "That admin email is linked to a different Google account."
+        return admin, None
+    by_sub = store.get_user_by_google_sub(google_sub)
+    if by_sub is not None and str(by_sub.id) != str(admin.id):
+        return None, "That Google account is already linked to another account."
+    return store.link_google(admin, google_sub), None
+
+
 def _applicant_from_google(store, email: str, google_sub: str):
-    """Create or link an applicant. Admin accounts are never signed in here."""
+    """Create or link an applicant. Never creates or signs in an admin."""
     by_sub = store.get_user_by_google_sub(google_sub)
     if by_sub is not None:
         if by_sub.is_admin:
-            return None, "Admin accounts sign in with email and password."
+            # Admin's Google account now reports a different email than the
+            # admin record. Refuse rather than guess.
+            return None, "Admin accounts sign in with the Google email on file."
         return by_sub, None
     existing = store.get_user_by_email(email)
     if existing is not None:
         if existing.is_admin:
-            return None, "Admin accounts sign in with email and password."
+            return None, "Admin accounts sign in with the Google email on file."
         if existing.google_sub and existing.google_sub != google_sub:
             return None, "That email is linked to a different Google account."
         return store.link_google(existing, google_sub), None

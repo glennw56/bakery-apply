@@ -2,7 +2,7 @@
 
 Same Cloud Run service: **`bakery-apply`** in GCP project **`bakery-444323`**. Do not create a new service, and do not deploy from this change until Shop Tech reviews it.
 
-Applicant Google sign-in is the OAuth 2.0 authorization-code flow. Admin can use Sign in with Google when Google returns a verified email equal to `ADMIN_EMAIL` (case-insensitive); email + password (`ADMIN_EMAIL` / `ADMIN_PASSWORD`) still works as a fallback. Other Google accounts never get admin.
+Applicant Google sign-in is the OAuth 2.0 authorization-code flow. Any existing admin user (a `users` doc with `is_admin: true`, including the `ADMIN_EMAIL` admin) can use Sign in with Google when Google returns a verified email equal to that doc's `email` (trimmed, case-insensitive). The first Google sign-in stores `google_sub` on the admin doc; after that a different Google account for the same email is refused. Google sign-in and signup never set `is_admin` — admin is only a flag set directly in Firestore — so every other Google account is an applicant. Email + password (`ADMIN_EMAIL` / `ADMIN_PASSWORD`) still works as a fallback. The Google redirect sends `prompt=select_account`, so Google always shows the account picker.
 
 ## Exact redirect URI
 

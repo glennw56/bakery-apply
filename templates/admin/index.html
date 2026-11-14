@@ -3,6 +3,13 @@
 {% block body_class %}admin{% endblock %}
 {% block content %}
   <h1>Admin</h1>
+  <div class="admin-tabs" role="tablist" aria-label="Admin sections">
+    <a role="tab" class="admin-tab{% if tab == 'applications' %} is-active{% endif %}" href="/admin?tab=applications{% if job_filter %}&amp;job={{ job_filter|urlencode }}{% endif %}"{% if tab == 'applications' %} aria-selected="true" aria-current="page"{% else %} aria-selected="false"{% endif %}>Applications <span class="tab-count">{{ total_count }}</span></a>
+    <a role="tab" class="admin-tab{% if tab == 'jobs' %} is-active{% endif %}" href="/admin?tab=jobs"{% if tab == 'jobs' %} aria-selected="true" aria-current="page"{% else %} aria-selected="false"{% endif %}>Job openings <span class="tab-count">{{ positions|length }}</span></a>
+  </div>
+
+  {% if tab == 'jobs' %}
+  <section role="tabpanel" id="panel-jobs" data-tab="jobs">
   <p class="lede">Add openings here. Closed positions are hidden on the public hiring page. Existing applications keep the title they applied under.</p>
 
   <h2>Add a position</h2>
@@ -90,16 +97,33 @@
   {% else %}
     <p class="hint">No positions yet.</p>
   {% endif %}
-
-  <h2>Applications</h2>
+  </section>
+  {% else %}
+  <section role="tabpanel" id="panel-applications" data-tab="applications">
   <p class="lede">Read why this shop first. Mark reviewed when you have looked.</p>
+  <form class="job-filter" method="get" action="/admin">
+    <input type="hidden" name="tab" value="applications">
+    <label for="job-filter">Job</label>
+    <select id="job-filter" name="job" onchange="this.form.submit()">
+      <option value=""{% if not job_filter %} selected{% endif %}>All jobs ({{ total_count }})</option>
+      {% for j in job_filters %}
+        <option value="{{ j.id }}"{% if job_filter == j.id %} selected{% endif %}>{{ j.title }}{% if not j.open %} (closed){% endif %} ({{ j.count }})</option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit">Filter</button></noscript>
+  </form>
+  <p class="hint filter-count">Showing {{ shown_count }} of {{ total_count }} application{% if total_count != 1 %}s{% endif %}{% if job_filter %} · <a href="/admin?tab=applications">Show all jobs</a>{% endif %}</p>
   {% if applications %}
     <div class="app-list">
       {% for item in applications %}
         {% include "admin/_row.html" %}
       {% endfor %}
     </div>
+  {% elif job_filter %}
+    <p class="hint">No applications for this job yet.</p>
   {% else %}
     <p class="hint">No applications yet.</p>
+  {% endif %}
+  </section>
   {% endif %}
 {% endblock %}

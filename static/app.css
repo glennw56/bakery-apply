@@ -420,3 +420,47 @@ fieldset.references .hint { margin: 0; }
 .site-footer p { margin: 0; }
 .site-footer a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .site-footer a:hover { text-decoration: underline; }
+
+/* Admin tabs: Applications | Job openings */
+.admin-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--gold);
+  margin: 0.6rem 0 1rem;
+}
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.95rem;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-btn) var(--radius-btn) 0 0;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  margin-bottom: -1px;
+}
+.admin-tab:hover { color: var(--accent); }
+.admin-tab.is-active {
+  background: var(--card);
+  border-color: var(--gold);
+  color: var(--accent);
+}
+.tab-count {
+  background: var(--line);
+  color: var(--muted);
+  border-radius: var(--radius-pill);
+  padding: 0 0.5rem;
+  font-size: 0.8rem;
+}
+.job-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.4rem;
+}
+.job-filter label { font-weight: 600; }
+.job-filter select { width: auto; min-width: 16rem; }

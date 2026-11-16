@@ -52,6 +52,7 @@ from app.google_oauth import (
     oauth_states_match,
 )
 from app.models import (
+    DESCRIPTION_MAX,
     HEAR_ABOUT_CHOICES,
     HEAR_ABOUT_SLUGS,
     MAX_REFERENCES,
@@ -321,6 +322,9 @@ def _position_fields_from_form(
         return None, "Title, hours/week, pay from, and pay to (dollars) are required."
     if hi < lo:
         return None, "Pay to must be at least pay from."
+    description = normalize_description(description)
+    if len(description) > DESCRIPTION_MAX:
+        return None, "Description must be 10,000 characters or fewer."
     return {
         "title": title,
         "hours_per_week": hours,
@@ -329,7 +333,7 @@ def _position_fields_from_form(
         "hourly_pay_max_cents": hi,
         "starting_out": _is_open_value(starting_out),
         "open": _is_open_value(open),
-        "description": normalize_description(description),
+        "description": description,
     }, None
 
 

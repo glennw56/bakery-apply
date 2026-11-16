@@ -1585,6 +1585,72 @@ def test_public_job_description_keeps_line_breaks_and_escapes_html() -> None:
     assert "<b>" not in textarea.group(1)
 
 
+def test_job_description_allows_long_text_and_rejects_over_limit() -> None:
+    """A ~5000-character description with line breaks is kept in full; over 10,000 is rejected."""
+    from app.models import DESCRIPTION_MAX, normalize_description
+
+    chunk = "Mix dough in the morning.\r\nShape loaves after the first rise.\n"
+    typed = "START MARKER\r\n\r\n" + (chunk * 80) + "END MARKER"
+    assert 4000 < len(typed) < DESCRIPTION_MAX
+    expected = normalize_description(typed)
+    assert "\r" not in expected
+    assert len(expected) > 4000
+
+    admin = _admin_client()
+    jobs = admin.get("/admin?tab=jobs")
+    assert jobs.status_code == 200
+    textareas = re.findall(r'<textarea name="description"[^>]*>', jobs.text)
+    assert textareas
+    assert all('maxlength="10000"' in tag and 'rows="12"' in tag for tag in textareas)
+    assert 'maxlength="2000"' not in jobs.text
+
+    created = admin.post(
+        "/admin/positions",
+        data={"title": "Long Description Baker", "hours_per_week": "25", "hourly_pay_min": "15", "hourly_pay_max": "16", "description": typed, "open": "true"},
+        follow_redirects=False,
+    )
+    assert created.status_code in (302, 303)
+
+    store = open_store()
+    try:
+        row = next(p for p in store.list_positions() if p.title == "Long Description Baker")
+        pos_id = row.id
+        assert row.description == expected
+    finally:
+        store.close()
+
+    public = _client()
+    job = public.get(f"/jobs/{pos_id}")
+    assert job.status_code == 200
+    assert expected in job.text
+    home = public.get("/")
+    assert expected in home.text
+
+    too_long = "x" * (DESCRIPTION_MAX + 1)
+    rejected = admin.post(
+        "/admin/positions",
+        data={"title": "Too Long Description", "hours_per_week": "10", "hourly_pay_min": "14", "hourly_pay_max": "15", "description": too_long, "open": "true"},
+        follow_redirects=True,
+    )
+    assert rejected.status_code == 200
+    assert "Description must be 10,000 characters or fewer." in rejected.text
+
+    rejected_update = admin.post(
+        f"/admin/positions/{pos_id}",
+        data={"title": "Long Description Baker", "hours_per_week": "25", "hourly_pay_min": "15", "hourly_pay_max": "16", "description": too_long, "open": "true", "action": "save"},
+        follow_redirects=True,
+    )
+    assert rejected_update.status_code == 200
+    assert "Description must be 10,000 characters or fewer." in rejected_update.text
+
+    store = open_store()
+    try:
+        row = next(p for p in store.list_positions() if str(p.id) == str(pos_id))
+        assert row.description == expected
+    finally:
+        store.close()
+
+
 def test_home_links_css_with_cache_bust_version() -> None:
     r = _client().get("/")
     assert r.status_code == 200

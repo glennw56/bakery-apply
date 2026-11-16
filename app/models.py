@@ -96,6 +96,10 @@ POSITION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
 )
 
 
+# Admin job description. The form maxlength and the server check use this cap.
+DESCRIPTION_MAX = 10000
+
+
 def normalize_description(description: str | None) -> str:
     """Keep the admin's wording. Only turn CRLF into LF and trim the ends."""
     text = description or ""

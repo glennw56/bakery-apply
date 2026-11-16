@@ -31,7 +31,7 @@
       Starting out
     </label>
     <label>Description (optional)
-      <textarea name="description" rows="3" maxlength="2000"></textarea>
+      <textarea name="description" rows="12" maxlength="10000"></textarea>
     </label>
     <label class="check-row">
       <input type="checkbox" name="open" value="true" checked>
@@ -72,7 +72,7 @@
               Starting out
             </label>
             <label>Description (optional)
-              <textarea name="description" rows="3" maxlength="2000">{{ p.description }}</textarea>
+              <textarea name="description" rows="12" maxlength="10000">{{ p.description }}</textarea>
             </label>
             <label class="check-row">
               <input type="checkbox" name="open" value="true" {% if p.open %}checked{% endif %}>
